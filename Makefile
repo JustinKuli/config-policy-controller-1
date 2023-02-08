@@ -344,7 +344,7 @@ e2e-test-hosted-mode-coverage: export TARGET_KUBECONFIG_PATH = $(PWD)/kubeconfig
 e2e-test-hosted-mode-coverage: e2e-run-instrumented e2e-test e2e-stop-instrumented
 
 .PHONY: e2e-test-running-in-cluster
-e2e-test-running-in-cluster: E2E_TEST_ARGS = --label-filter="running-in-cluster"
+e2e-test-running-in-cluster: E2E_TEST_ARGS = --label-filter="running-in-cluster" --coverprofile=coverage_e2e_uninstall.out --coverpkg=open-cluster-management.io/config-policy-controller/pkg/triggeruninstall
 e2e-test-running-in-cluster: e2e-test
 
 .PHONY: e2e-build-instrumented
