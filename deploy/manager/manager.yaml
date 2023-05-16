@@ -7,10 +7,14 @@ spec:
   replicas: 1
   selector:
     matchLabels:
+      app: config-policy-controller
       name: config-policy-controller
   template:
     metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: config-policy-controller
       labels:
+        app: config-policy-controller
         name: config-policy-controller
     spec:
       serviceAccountName: config-policy-controller
@@ -36,3 +40,21 @@ spec:
                   fieldPath: metadata.name
             - name: OPERATOR_NAME
               value: "config-policy-controller"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            failureThreshold: 3
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            failureThreshold: 3
+            periodSeconds: 10
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            failureThreshold: 30
+            periodSeconds: 10

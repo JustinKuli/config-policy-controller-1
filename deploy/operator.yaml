@@ -37,10 +37,14 @@ spec:
   replicas: 1
   selector:
     matchLabels:
+      app: config-policy-controller
       name: config-policy-controller
   template:
     metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: config-policy-controller
       labels:
+        app: config-policy-controller
         name: config-policy-controller
     spec:
       containers:
@@ -64,5 +68,23 @@ spec:
           value: config-policy-controller
         image: quay.io/open-cluster-management/config-policy-controller:latest
         imagePullPolicy: Always
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /healthz
+            port: 8081
+          periodSeconds: 10
         name: config-policy-controller
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /readyz
+            port: 8081
+          periodSeconds: 10
+        startupProbe:
+          failureThreshold: 30
+          httpGet:
+            path: /readyz
+            port: 8081
+          periodSeconds: 10
       serviceAccountName: config-policy-controller
