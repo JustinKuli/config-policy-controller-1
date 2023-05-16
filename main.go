@@ -295,7 +295,7 @@ func main() {
 	}
 	//+kubebuilder:scaffold:builder
 
-	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
+	if err := mgr.AddHealthzCheck("healthz", reconciler.DiscoveryHealthCheck()); err != nil {
 		log.Error(err, "Unable to set up health check")
 		os.Exit(1)
 	}

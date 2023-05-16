@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"reflect"
 	"sort"
@@ -330,6 +331,15 @@ func (r *ConfigurationPolicyReconciler) refreshDiscoveryInfo() error {
 	r.discoveryInfo.discoveryLastRefreshed = time.Now().UTC()
 
 	return r.refreshError // can be nil
+}
+
+// DiscoveryHealthCheck is a health checker that fails if the last discovery refresh had an error.
+// In order to operate perfectly, this controller requires perfect knowledge of all API resources
+// on the cluster. When it doesn't have that, this will report it as unhealthy.
+func (r *ConfigurationPolicyReconciler) DiscoveryHealthCheck() func(req *http.Request) error {
+	return func(_ *http.Request) error {
+		return r.refreshError
+	}
 }
 
 // shouldEvaluatePolicy will determine if the policy is ready for evaluation by examining the
