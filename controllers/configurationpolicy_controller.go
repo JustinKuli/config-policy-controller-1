@@ -96,6 +96,7 @@ type discoveryInfo struct {
 	apiResourceList        []*metav1.APIResourceList
 	apiGroups              []*restmapper.APIGroupResources
 	discoveryLastRefreshed time.Time
+	refreshError           error
 }
 
 // ConfigurationPolicyReconciler reconciles a ConfigurationPolicy object
@@ -288,6 +289,9 @@ func (r *ConfigurationPolicyReconciler) handlePolicyWorker(
 	}
 }
 
+// refreshDiscoveryInfo tries to discover all the available APIs on the cluster, and update the
+// cached information. If it encounters an error, it may update the cache with partial results,
+// if those seem "better" than what's in the current cache.
 func (r *ConfigurationPolicyReconciler) refreshDiscoveryInfo() error {
 	log.V(2).Info("Refreshing the discovery info")
 	r.lock.Lock()
@@ -295,28 +299,37 @@ func (r *ConfigurationPolicyReconciler) refreshDiscoveryInfo() error {
 
 	dd := r.TargetK8sClient.Discovery()
 
-	_, apiResourceList, err := dd.ServerGroupsAndResources()
-	if err != nil {
-		log.Error(err, "Could not get the API resource list")
-
-		return err
+	_, apiResourceList, resourceErr := dd.ServerGroupsAndResources()
+	if resourceErr != nil {
+		r.refreshError = resourceErr
+		log.Error(resourceErr, "Could not get the full API resource list")
 	}
 
-	r.apiResourceList = apiResourceList
-
-	apiGroups, err := restmapper.GetAPIGroupResources(dd)
-	if err != nil {
-		log.Error(err, "Could not get the API groups list")
-
-		return err
+	if resourceErr == nil || (len(apiResourceList) > len(r.discoveryInfo.apiResourceList)) {
+		// update the list if it's complete, or if it's "better" than the old one
+		r.discoveryInfo.apiResourceList = apiResourceList
 	}
 
-	r.apiGroups = apiGroups
+	apiGroups, groupErr := restmapper.GetAPIGroupResources(dd)
+	if groupErr != nil {
+		r.refreshError = groupErr
+		log.Error(groupErr, "Could not get the full API groups list")
+	}
+
+	if resourceErr == nil && groupErr == nil {
+		r.refreshError = nil
+	}
+
+	if r.refreshError == nil || (len(apiGroups) > len(r.discoveryInfo.apiGroups)) {
+		// update the list if it's complete, or if it's "better" than the old one
+		r.discoveryInfo.apiGroups = apiGroups
+	}
+
 	// Reset the OpenAPI cache in case the CRDs were updated since the last fetch.
 	r.openAPIParser = openapi.NewOpenAPIParser(dd)
-	r.discoveryLastRefreshed = time.Now().UTC()
+	r.discoveryInfo.discoveryLastRefreshed = time.Now().UTC()
 
-	return nil
+	return r.refreshError // can be nil
 }
 
 // shouldEvaluatePolicy will determine if the policy is ready for evaluation by examining the
