@@ -1688,48 +1688,46 @@ func (r *ConfigurationPolicyReconciler) handleSingleObj(
 ) {
 	objLog := log.WithValues("object", obj.name, "policy", obj.policy.Name, "index", obj.index)
 
+	result = objectTmplEvalResult{
+		objectNames: []string{obj.name},
+		namespace:   obj.namespace,
+		events:      []objectTmplEvalEvent{},
+	}
+
 	if !exists && obj.shouldExist {
 		// object is missing and will be created, so send noncompliant "does not exist" event regardless of the
 		// remediation action
 		noncompliantReason := generateSingleObjReason(obj.shouldExist, false, exists)
-		result = objectTmplEvalResult{
-			objectNames: []string{obj.name},
-			namespace:   obj.namespace,
-			events:      []objectTmplEvalEvent{{false, noncompliantReason, ""}},
-		}
+		result.events = append(result.events, objectTmplEvalEvent{false, noncompliantReason, ""})
 
 		// it is a musthave and it does not exist, so it must be created
 		if strings.EqualFold(string(remediation), string(policyv1.Enforce)) {
 			var uid string
-			completed, reason, msg, uid, err := r.enforceByCreatingOrDeleting(obj)
+			completed, reason, msg, uid, err := r.enforceByCreatingOrDeleting(&obj)
 
 			result.events = append(result.events, objectTmplEvalEvent{completed, reason, msg})
 
 			if err != nil {
 				// violation created for handling error
 				objLog.Error(err, "Could not handle missing musthave object")
-			} else {
-				created := true
-				creationInfo = &policyv1.ObjectProperties{
-					CreatedByPolicy: &created,
-					UID:             uid,
-				}
-			}
-		}
 
-		return
+				return
+			}
+
+			created := true
+			creationInfo = &policyv1.ObjectProperties{
+				CreatedByPolicy: &created,
+				UID:             uid,
+			}
+
+			exists = true // go into the exists case below
+		}
 	}
 
 	if exists && !obj.shouldExist {
-		result = objectTmplEvalResult{
-			objectNames: []string{obj.name},
-			namespace:   obj.namespace,
-			events:      []objectTmplEvalEvent{},
-		}
-
 		// it is a mustnothave but it exist, so it must be deleted
 		if strings.EqualFold(string(remediation), string(policyv1.Enforce)) {
-			completed, reason, msg, _, err := r.enforceByCreatingOrDeleting(obj)
+			completed, reason, msg, _, err := r.enforceByCreatingOrDeleting(&obj)
 			if err != nil {
 				objLog.Error(err, "Could not handle existing mustnothave object")
 			}
@@ -1748,18 +1746,18 @@ func (r *ConfigurationPolicyReconciler) handleSingleObj(
 		// it is a must not have and it does not exist, so it is compliant
 
 		reason := generateSingleObjReason(obj.shouldExist, true, exists)
-		result = objectTmplEvalResult{
-			objectNames: []string{obj.name},
-			namespace:   obj.namespace,
-			events:      []objectTmplEvalEvent{{true, reason, ""}},
-		}
+		result.events = append(result.events, objectTmplEvalEvent{false, reason, ""})
 
 		return
 	}
 
 	// object exists and the template requires it, so we need to check specific fields to see if we have a match
 	if exists {
-		log.V(2).Info("The object already exists. Verifying the object fields match what is desired.")
+		if creationInfo == nil {
+			log.V(2).Info("The object already exists. Verifying the object fields match what is desired.")
+		} else {
+			log.V(2).Info("The object was created. Verifying the object fields match what is desired.")
+		}
 
 		compType := strings.ToLower(string(objectT.ComplianceType))
 		mdCompType := strings.ToLower(string(objectT.MetadataComplianceType))
@@ -1769,12 +1767,6 @@ func (r *ConfigurationPolicyReconciler) handleSingleObj(
 		throwSpecViolation, msg, triedUpdate, updatedObj := r.checkAndUpdateResource(
 			obj, compType, mdCompType, remediation,
 		)
-
-		result = objectTmplEvalResult{
-			objectNames: []string{obj.name},
-			namespace:   obj.namespace,
-			events:      []objectTmplEvalEvent{},
-		}
 
 		if triedUpdate && !strings.Contains(msg, "Error validating the object") {
 			// The object was mismatched and was potentially fixed depending on the remediation action
@@ -2016,7 +2008,7 @@ func getNamesOfKind(
 // completely missing (as opposed to existing, but not matching the desired state), or where a
 // mustnothave object does exist. Eg, it does not handle the case where a targeted update would need
 // to be made to an object.
-func (r *ConfigurationPolicyReconciler) enforceByCreatingOrDeleting(obj singleObject) (
+func (r *ConfigurationPolicyReconciler) enforceByCreatingOrDeleting(obj *singleObject) (
 	result bool, reason string, msg string, uid string, erro error,
 ) {
 	log := log.WithValues(
@@ -2047,14 +2039,7 @@ func (r *ConfigurationPolicyReconciler) enforceByCreatingOrDeleting(obj singleOb
 			log.V(2).Info("Created missing must have object", "resource", obj.gvr.Resource, "name", obj.name)
 			reason = reasonWantFoundCreated
 			msg = fmt.Sprintf("%v %v was created successfully", obj.gvr.Resource, idStr)
-
-			var uidIsString bool
-			uid, uidIsString, err = unstructured.NestedString(obj.object.Object, "metadata", "uid")
-
-			if !uidIsString || err != nil {
-				log.Error(err, "Tried to set UID in status but the field is not a string")
-			}
-
+			uid = string(obj.object.GetUID())
 			completed = true
 		}
 	} else {
