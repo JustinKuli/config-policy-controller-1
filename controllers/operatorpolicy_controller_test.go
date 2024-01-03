@@ -81,7 +81,7 @@ func TestBuildOperatorGroup(t *testing.T) {
 	// Ensure OperatorGroup values are populated correctly
 	ret := buildOperatorGroup(testPolicy)
 	assert.Equal(t, ret.GetObjectKind().GroupVersionKind(), desiredGVK)
-	assert.Equal(t, ret.ObjectMeta.GetName(), "my-operator-operator-group")
+	assert.Equal(t, ret.ObjectMeta.GetName(), "my-policy-default-og")
 	assert.Equal(t, ret.ObjectMeta.GetNamespace(), "default")
-	assert.Equal(t, ret.Spec.TargetNamespaces, []string{"*"})
+	assert.Equal(t, ret.Spec.TargetNamespaces, []string(nil))
 }

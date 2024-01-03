@@ -55,7 +55,7 @@ type OperatorGroup struct {
 	// Namespace of the referent
 	Namespace string `json:"namespace,omitempty"`
 	// Target namespaces of the referent
-	Target []TargetNsOrSelector `json:"target,omitempty"`
+	Target TargetNsOrSelector `json:"target,omitempty"`
 	// Name of the OLM ServiceAccount that defines permissions for member operators
 	// +optional
 	ServiceAccountName string `json:"serviceAccountName,omitempty"`

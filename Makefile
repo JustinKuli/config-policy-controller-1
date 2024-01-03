@@ -30,7 +30,7 @@ KIND_NAME ?= test-$(MANAGED_CLUSTER_NAME)
 KIND_CLUSTER_NAME ?= kind-$(KIND_NAME)
 KIND_NAMESPACE ?= $(CONTROLLER_NAMESPACE)
 # Test coverage threshold
-export COVERAGE_MIN ?= 74
+export COVERAGE_MIN ?= 75
 COVERAGE_E2E_OUT ?= coverage_e2e.out
 
 # Image URL to use all building/pushing image targets;
@@ -39,12 +39,6 @@ IMG ?= $(CONTROLLER_NAME)
 REGISTRY ?= quay.io/open-cluster-management
 TAG ?= latest
 IMAGE_NAME_AND_VERSION ?= $(REGISTRY)/$(IMG)
-
-# Fix sed issues on mac by using GSED
-SED="sed"
-ifeq ($(GOOS), darwin)
-  SED="gsed"
-endif
 
 include build/common/Makefile.common.mk
 
@@ -71,7 +65,7 @@ test-coverage: TESTARGS = -json -cover -covermode=atomic -coverprofile=coverage_
 test-coverage: test
 
 .PHONY: gosec-scan
-gosec-scan: GOSEC_ARGS = -exclude-generated
+gosec-scan:
 
 ############################################################
 # build section
@@ -92,10 +86,8 @@ build-images:
 
 # Deploy controller in the configured Kubernetes cluster in ~/.kube/config
 .PHONY: deploy
-deploy: generate-operator-yaml create-ns
-	$(SED) -i 's/\(namespace: \)open-cluster-management-agent-addon/\1$(CONTROLLER_NAMESPACE)/' -i deploy/operator.yaml 
+deploy: generate-operator-yaml
 	kubectl apply -f deploy/operator.yaml -n $(CONTROLLER_NAMESPACE)
-	$(SED) -i 's/\(namespace: \)$(CONTROLLER_NAMESPACE)/\1open-cluster-management-agent-addon/' -i deploy/operator.yaml 
 	kubectl apply -f deploy/crds/policy.open-cluster-management.io_configurationpolicies.yaml -n $(CONTROLLER_NAMESPACE)
 	kubectl set env deployment/$(IMG) -n $(CONTROLLER_NAMESPACE) WATCH_NAMESPACE=$(WATCH_NAMESPACE)
 
@@ -192,6 +184,11 @@ kind-tests: kind-delete-cluster kind-bootstrap-cluster-dev kind-deploy-controlle
 
 .PHONY: install-crds
 install-crds:
+	@echo installing olm
+	# operator-sdk olm install
+	curl -L https://github.com/operator-framework/operator-lifecycle-manager/releases/download/v0.26.0/install.sh -o install.sh
+	chmod +x install.sh
+	./install.sh v0.26.0
 	@echo installing crds
 	kubectl apply -f test/crds/clusterversions.config.openshift.io.yaml
 	kubectl apply -f test/crds/securitycontextconstraints.security.openshift.io_crd.yaml
@@ -201,6 +198,7 @@ install-crds:
 	kubectl apply -f https://raw.githubusercontent.com/open-cluster-management-io/governance-policy-propagator/main/deploy/crds/policy.open-cluster-management.io_policies.yaml
 	kubectl apply -f deploy/crds/policy.open-cluster-management.io_configurationpolicies.yaml
 	kubectl apply -f deploy/crds/policy.open-cluster-management.io_operatorpolicies.yaml
+	kubectl apply -f https://raw.githubusercontent.com/operator-framework/api/master/crds/operators.coreos.com_olmconfigs.yaml
 
 .PHONY: install-resources
 install-resources:

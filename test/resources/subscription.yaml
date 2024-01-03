@@ -1,0 +1,12 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: quay
+  namespace: default
+spec:
+  channel: stable-3.8
+  installPlanApproval: Automatic
+  name: project-quay
+  source: operatorhubio-catalog
+  sourceNamespace: olm
+  startingCSV: quay-operator.v3.8.1

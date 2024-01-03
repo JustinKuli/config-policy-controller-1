@@ -1,0 +1,21 @@
+apiVersion: policy.open-cluster-management.io/v1beta1
+kind: OperatorPolicy
+metadata:
+  name: quay-example
+spec:
+  remediationAction: enforce
+  severity: medium
+  complianceType: musthave
+  subscription:
+    channel: stable-3.8
+    name: project-quay
+    namespace: default
+    installPlanApproval: Automatic
+    source: operatorhubio-catalog
+    sourceNamespace: olm
+    startingCSV: quay-operator.v3.8.1
+  statusConfig:
+    catalogSourceUnhealthy: NonCompliant
+    deploymentsUnavailable: NonCompliant
+    upgradesAvailable: StatusMessageOnly
+    upgradesProgressing: NonCompliant
