@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	gocmp "github.com/google/go-cmp/cmp"
 	"github.com/prometheus/client_golang/prometheus"
 	templates "github.com/stolostron/go-template-utils/v4/pkg/templates"
@@ -1592,7 +1593,7 @@ func (r *ConfigurationPolicyReconciler) handleObjects(
 				creationInfo,
 			)
 		}
-	} else { // This case only occurs when the desired object is not named
+	} else { // This case only occurs when the desired object is not named // jkuli: come back to this case
 		resultEvent := objectTmplEvalEvent{}
 		if objShouldExist {
 			if exists {
@@ -1775,11 +1776,8 @@ func (r *ConfigurationPolicyReconciler) handleSingleObj(
 
 			throwSpecViolation = !compliant
 		} else {
-			compType := strings.ToLower(string(objectT.ComplianceType))
-			mdCompType := strings.ToLower(string(objectT.MetadataComplianceType))
-
 			throwSpecViolation, msg, triedUpdate, updatedObj = r.checkAndUpdateResource(
-				obj, compType, mdCompType, remediation,
+				obj, objectT, remediation,
 			)
 		}
 
@@ -2549,10 +2547,12 @@ type cachedEvaluationResult struct {
 // successfully.
 func (r *ConfigurationPolicyReconciler) checkAndUpdateResource(
 	obj singleObject,
-	complianceType string,
-	mdComplianceType string,
+	objectT *policyv1.ObjectTemplate,
 	remediation policyv1.RemediationAction,
 ) (throwSpecViolation bool, message string, updateNeeded bool, updateSucceeded bool) {
+	complianceType := strings.ToLower(string(objectT.ComplianceType))
+	mdComplianceType := strings.ToLower(string(objectT.MetadataComplianceType))
+
 	log := log.WithValues(
 		"policy", obj.policy.Name, "name", obj.name, "namespace", obj.namespace, "resource", obj.gvr.Resource,
 	)
@@ -2696,7 +2696,7 @@ func (r *ConfigurationPolicyReconciler) checkAndUpdateResource(
 					if getErr == nil {
 						obj.existingObj = rv
 
-						return r.checkAndUpdateResource(obj, complianceType, mdComplianceType, remediation)
+						return r.checkAndUpdateResource(obj, objectT, remediation)
 					}
 				}
 
@@ -2725,6 +2725,16 @@ func (r *ConfigurationPolicyReconciler) checkAndUpdateResource(
 				return false, "", false, false
 			}
 
+			if objectT.RecordDiff == policyv1.RecordDiffLog {
+				updatedYAML, _ := yaml.Marshal(dryRunUpdatedObj.Object)
+				existingYAML, _ := yaml.Marshal(existingObjectCopy.Object)
+
+				if diff := cmp.Diff(string(updatedYAML), string(existingYAML)); diff != "" {
+					log.Info("Logging the Diff")
+					fmt.Println(diff)
+				}
+			}
+
 			// The object would have been updated, so if it's inform, return as noncompliant.
 			if strings.EqualFold(string(remediation), string(policyv1.Inform)) {
 				r.setEvaluatedObject(obj.policy, obj.existingObj, false)
@@ -2744,7 +2754,7 @@ func (r *ConfigurationPolicyReconciler) checkAndUpdateResource(
 				if getErr == nil {
 					obj.existingObj = rv
 
-					return r.checkAndUpdateResource(obj, complianceType, mdComplianceType, remediation)
+					return r.checkAndUpdateResource(obj, objectT, remediation)
 				}
 			}
 

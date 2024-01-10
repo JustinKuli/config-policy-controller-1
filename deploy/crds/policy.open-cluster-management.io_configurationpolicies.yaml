@@ -168,6 +168,14 @@ spec:
                         object
                       type: object
                       x-kubernetes-preserve-unknown-fields: true
+                    recordDiff:
+                      description: Record diff specifies whether (and where) to log
+                        the diff on an object when what is on the cluster does not
+                        match what is in the policy.
+                      enum:
+                      - Log
+                      - None
+                      type: string
                   required:
                   - complianceType
                   - objectDefinition

@@ -16,7 +16,7 @@ const (
 	case27UpdateYaml       string = "../resources/case27_showupdateinstatus/case27-update-cfgmap-policy.yaml"
 )
 
-var _ = Describe("Verify status update after updating object", Ordered, func() {
+var _ = FDescribe("Verify status update after updating object", Ordered, func() {
 	It("configmap should be created properly on the managed cluster", func() {
 		By("Creating " + case27ConfigPolicyName + " on managed")
 		utils.Kubectl("apply", "-f", case27CreateYaml, "-n", testNamespace)
