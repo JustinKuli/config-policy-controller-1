@@ -1,21 +1,21 @@
 apiVersion: policy.open-cluster-management.io/v1beta1
 kind: OperatorPolicy
 metadata:
-  name: test-operator-policy
+  name: test-operator-policy-one
 spec:
   remediationAction: enforce # or inform
   severity: medium
   complianceType: musthave # or mustnothave
   operatorGroup: # optional
     name: og-single
-    namespace: default
+    namespace: test-op-pol-one
     target:
       namespaces:
-        - default
+        - test-op-pol-one
   subscription:
     channel: stable-3.8
     name: project-quay
-    namespace: default
+    namespace: test-op-pol-one
     installPlanApproval: Automatic # may be overridden to Manual by other settings
     source: operatorhubio-catalog
     sourceNamespace: olm

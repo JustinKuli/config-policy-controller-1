@@ -47,6 +47,8 @@ var (
 	gvrConfigMap                schema.GroupVersionResource
 	gvrDeployment               schema.GroupVersionResource
 	gvrPolicy                   schema.GroupVersionResource
+	gvrOperatorGroup            schema.GroupVersionResource
+	gvrSubscription             schema.GroupVersionResource
 
 	defaultImageRegistry string
 )
@@ -103,6 +105,16 @@ var _ = BeforeSuite(func() {
 		Resource: "clusterclaims",
 	}
 	gvrDeployment = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+	gvrOperatorGroup = schema.GroupVersionResource{
+		Group:    "operators.coreos.com",
+		Version:  "v1",
+		Resource: "operatorgroups",
+	}
+	gvrSubscription = schema.GroupVersionResource{
+		Group:    "operators.coreos.com",
+		Version:  "v1alpha1",
+		Resource: "subscriptions",
+	}
 	clientManaged = NewKubeClient("", kubeconfigManaged, "")
 	clientManagedDynamic = NewKubeClientDynamic("", kubeconfigManaged, "")
 	defaultImageRegistry = "quay.io/open-cluster-management"

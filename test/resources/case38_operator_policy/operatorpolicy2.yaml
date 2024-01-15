@@ -9,7 +9,7 @@ spec:
   subscription:
     channel: stable-3.8
     name: project-quay
-    namespace: default
+    namespace: test-op-pol-two
     installPlanApproval: Automatic
     source: operatorhubio-catalog
     sourceNamespace: olm

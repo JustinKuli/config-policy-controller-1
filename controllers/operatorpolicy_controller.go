@@ -85,6 +85,11 @@ func (r *OperatorPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		if errors.IsNotFound(err) {
 			OpLog.Info("Operator policy could not be found")
 
+			err = r.DynamicWatcher.EndQueryBatch(watcher)
+			if err != nil {
+				panic(err)
+			}
+
 			err := r.DynamicWatcher.RemoveWatcher(watcher)
 			if err != nil {
 				OpLog.Error(err, "Error updating dependency watcher. Ignoring the failure.")
