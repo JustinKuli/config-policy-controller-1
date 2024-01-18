@@ -40,14 +40,7 @@ spec:
                 description: ComplianceType describes whether we must or must not
                   have a given resource
                 enum:
-                - MustHave
-                - Musthave
                 - musthave
-                - MustOnlyHave
-                - Mustonlyhave
-                - mustonlyhave
-                - MustNotHave
-                - Mustnothave
                 - mustnothave
                 type: string
               operatorGroup:

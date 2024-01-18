@@ -97,7 +97,7 @@ type StatusConfig struct {
 type OperatorPolicySpec struct {
 	Severity          policyv1.Severity          `json:"severity,omitempty"`          // low, medium, high
 	RemediationAction policyv1.RemediationAction `json:"remediationAction,omitempty"` // inform, enforce
-	ComplianceType    policyv1.ComplianceType    `json:"complianceType"`              // Compliant, NonCompliant
+	ComplianceType    policyv1.ComplianceType    `json:"complianceType"`              // musthave, mustnothave
 	// OperatorGroup requires at least 1 of target namespaces, or label selectors
 	// to be set to scope member operators' namespaced permissions. If both are provided,
 	// only the target namespace will be used and the label selector will be omitted.
