@@ -5,7 +5,6 @@ package controllers
 
 import (
 	"context"
-	"fmt"
 
 	operatorv1 "github.com/operator-framework/api/pkg/operators/v1"
 	operatorv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
@@ -35,8 +34,6 @@ var (
 	subscriptionGVK  = schema.GroupVersionKind{Group: "operators.coreos.com", Version: "v1alpha1", Kind: "Subscription"}
 	operatorGroupGVK = schema.GroupVersionKind{Group: "operators.coreos.com", Version: "v1", Kind: "OperatorGroup"}
 )
-
-var OpLog = ctrl.Log.WithName(OperatorControllerName)
 
 // OperatorPolicyReconciler reconciles a OperatorPolicy object
 type OperatorPolicyReconciler struct {
@@ -75,6 +72,7 @@ var _ reconcile.Reconciler = &OperatorPolicyReconciler{}
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.14.4/pkg/reconcile
 func (r *OperatorPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	OpLog := ctrl.LoggerFrom(ctx)
 	policy := &policyv1beta1.OperatorPolicy{}
 
 	watcher := depclient.ObjectIdentifier{
@@ -89,7 +87,7 @@ func (r *OperatorPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	err := r.Get(ctx, req.NamespacedName, policy)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			OpLog.Info("Operator policy could not be found", "name", req.Name, "namespace", req.Namespace)
+			OpLog.Info("Operator policy could not be found")
 
 			err = r.DynamicWatcher.RemoveWatcher(watcher)
 			if err != nil {
@@ -107,8 +105,7 @@ func (r *OperatorPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// Start query batch for caching and watching related objects
 	err = r.DynamicWatcher.StartQueryBatch(watcher)
 	if err != nil {
-		OpLog.Error(err, "Could not start query batch for the watcher", "watcher", watcher.Name,
-			"watcherKind", watcher.Kind)
+		OpLog.Error(err, "Could not start query batch for the watcher")
 
 		return reconcile.Result{}, err
 	}
@@ -116,21 +113,20 @@ func (r *OperatorPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	defer func() {
 		err := r.DynamicWatcher.EndQueryBatch(watcher)
 		if err != nil {
-			OpLog.Error(err, "Could not end query batch for the watcher", "watcher", watcher.Name,
-				"watcherKind", watcher.Kind)
+			OpLog.Error(err, "Could not end query batch for the watcher")
 		}
 	}()
 
 	// handle the policy
-	OpLog.Info("Reconciling OperatorPolicy", "policy", policy.Name)
+	OpLog.Info("Reconciling OperatorPolicy")
 
 	// Check if specified Subscription exists
 	cachedSubscription, err := r.DynamicWatcher.Get(watcher, subscriptionGVK, policy.Spec.Subscription.Namespace,
 		policy.Spec.Subscription.SubscriptionSpec.Package)
 	if err != nil {
-		OpLog.Error(err, "Could not get subscription", "kind", subscriptionGVK.Kind,
-			"name", policy.Spec.Subscription.SubscriptionSpec.Package,
-			"namespace", policy.Spec.Subscription.Namespace)
+		OpLog.Error(err, "Could not get subscription",
+			"SubscriptionName", policy.Spec.Subscription.SubscriptionSpec.Package,
+			"SubscriptionNamespace", policy.Spec.Subscription.Namespace)
 
 		return reconcile.Result{}, err
 	}
@@ -145,8 +141,7 @@ func (r *OperatorPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	cachedOperatorGroups, err := r.DynamicWatcher.List(watcher, operatorGroupGVK, ogNamespace, nil)
 	if err != nil {
-		OpLog.Error(err, "Could not list operator group", "kind", operatorGroupGVK.Kind,
-			"namespace", ogNamespace)
+		OpLog.Error(err, "Could not list operator group", "OperatorGroupNamespace", ogNamespace)
 
 		return reconcile.Result{}, err
 	}
@@ -194,10 +189,16 @@ func (r *OperatorPolicyReconciler) createPolicyResources(
 	cachedSubscription *unstructured.Unstructured,
 	cachedOGList []unstructured.Unstructured,
 ) (ctrl.Result, error) {
+	OpLog := ctrl.LoggerFrom(ctx)
+
 	//  Create og, then trigger reconcile
 	if len(cachedOGList) == 0 {
 		if policy.Spec.RemediationAction.IsEnforce() {
 			ogSpec := buildOperatorGroup(policy)
+
+			OpLog.Info("Creating the operator group",
+				"OperatorGroupName", ogSpec.Name,
+				"OperatorGroupNamespace", ogSpec.Namespace)
 
 			err := r.Create(ctx, ogSpec)
 			if err != nil {
@@ -225,6 +226,10 @@ func (r *OperatorPolicyReconciler) createPolicyResources(
 	if cachedSubscription == nil {
 		if policy.Spec.RemediationAction.IsEnforce() {
 			subscriptionSpec := buildSubscription(policy)
+
+			OpLog.Info("Creating the subscription",
+				"SubscriptionName", subscriptionSpec.Name,
+				"SubscriptionNamespace", subscriptionSpec.Namespace)
 
 			err := r.Create(ctx, subscriptionSpec)
 			if err != nil {
@@ -254,19 +259,18 @@ func (r *OperatorPolicyReconciler) updatePolicyStatus(
 	ctx context.Context,
 	policy *policyv1beta1.OperatorPolicy,
 ) error {
+	OpLog := ctrl.LoggerFrom(ctx)
 	updatedStatus := policy.Status
 
 	err := r.Get(ctx, types.NamespacedName{Namespace: policy.Namespace, Name: policy.Name}, policy)
 	if err != nil {
-		OpLog.Info(fmt.Sprintf("Failed to refresh policy; using previously fetched version: %s", err))
+		OpLog.Info("Failed to refresh policy; using previously fetched version", "IgnoredError", err)
 	} else {
 		policy.Status = updatedStatus
 	}
 
 	err = r.Status().Update(ctx, policy)
 	if err != nil {
-		OpLog.Info(fmt.Sprintf("Failed to update policy status: %s", err))
-
 		return err
 	}
 
@@ -285,9 +289,6 @@ func buildSubscription(
 	subscription.ObjectMeta.Namespace = policy.Spec.Subscription.Namespace
 	subscription.Spec = policy.Spec.Subscription.SubscriptionSpec.DeepCopy()
 
-	OpLog.Info("Creating the subscription", "kind", subscription.Kind,
-		"namespace", subscription.Namespace)
-
 	return subscription
 }
 
@@ -297,6 +298,8 @@ func (r *OperatorPolicyReconciler) setCompliance(
 	policy *policyv1beta1.OperatorPolicy,
 	compliance policyv1.ComplianceState,
 ) {
+	OpLog := ctrl.LoggerFrom(ctx)
+
 	policy.Status.ComplianceState = compliance
 
 	err := r.updatePolicyStatus(ctx, policy)
@@ -325,9 +328,6 @@ func buildOperatorGroup(
 		operatorGroup.ObjectMeta.SetNamespace(policy.Spec.OperatorGroup.Namespace)
 		operatorGroup.Spec.TargetNamespaces = policy.Spec.OperatorGroup.Target.Namespace
 	}
-
-	OpLog.Info("Creating the operator group", "kind", operatorGroup.Kind,
-		"namespace", operatorGroup.Namespace)
 
 	return operatorGroup
 }
