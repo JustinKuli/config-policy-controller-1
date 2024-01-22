@@ -68,7 +68,7 @@ var (
 	plcFmtStr    = "policy: %s"
 )
 
-var (
+const (
 	reasonWantFoundExists    = "Resource found as expected"
 	reasonWantFoundCreated   = "K8s creation success"
 	reasonUpdateSuccess      = "K8s update success"

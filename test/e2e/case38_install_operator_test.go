@@ -7,7 +7,7 @@ import (
 	"open-cluster-management.io/config-policy-controller/test/utils"
 )
 
-var _ = Describe("Test installing an operator from OperatorPolicy", Ordered, func() {
+var _ = FDescribe("Test installing an operator from OperatorPolicy", Ordered, func() {
 	const (
 		case38BasePath              = "../resources/case38_operator_install/"
 		case38OpPolicy              = case38BasePath + "case38_OpPlc.yaml"

@@ -62,72 +62,87 @@ spec:
                   namespace:
                     description: Namespace of the referent
                     type: string
-                  serviceAccountName:
-                    description: Name of the OLM ServiceAccount that defines permissions
-                      for member operators
-                    type: string
-                  target:
-                    description: Target namespaces of the referent
+                  selector:
+                    description: Selector selects the OperatorGroup's target namespaces.
                     properties:
-                      namespaces:
-                        description: '''namespaces'' and ''selector'' both define
-                          an array/set of target namespaces that should be affected
-                          on the cluster. Only one of ''namespaces'' or ''selector''
-                          should be specified, and if both are set then ''selector''
-                          will be omitted.'
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
                         items:
-                          type: string
-                        type: array
-                      selector:
-                        description: '''namespaces'' and ''selector'' both define
-                          an array/set of target namespaces that should be affected
-                          on the cluster. Only one of ''namespaces'' or ''selector''
-                          should be specified, and if both are set then ''selector''
-                          will be omitted.'
-                        properties:
-                          matchExpressions:
-                            description: matchExpressions is a list of label selector
-                              requirements. The requirements are ANDed.
-                            items:
-                              description: A label selector requirement is a selector
-                                that contains values, a key, and an operator that
-                                relates the key and values.
-                              properties:
-                                key:
-                                  description: key is the label key that the selector
-                                    applies to.
-                                  type: string
-                                operator:
-                                  description: operator represents a key's relationship
-                                    to a set of values. Valid operators are In, NotIn,
-                                    Exists and DoesNotExist.
-                                  type: string
-                                values:
-                                  description: values is an array of string values.
-                                    If the operator is In or NotIn, the values array
-                                    must be non-empty. If the operator is Exists or
-                                    DoesNotExist, the values array must be empty.
-                                    This array is replaced during a strategic merge
-                                    patch.
-                                  items:
-                                    type: string
-                                  type: array
-                              required:
-                              - key
-                              - operator
-                              type: object
-                            type: array
-                          matchLabels:
-                            additionalProperties:
+                          description: A label selector requirement is a selector
+                            that contains values, a key, and an operator that relates
+                            the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
                               type: string
-                            description: matchLabels is a map of {key,value} pairs.
-                              A single {key,value} in the matchLabels map is equivalent
-                              to an element of matchExpressions, whose key field is
-                              "key", the operator is "In", and the values array contains
-                              only "value". The requirements are ANDed.
-                            type: object
+                            operator:
+                              description: operator represents a key's relationship
+                                to a set of values. Valid operators are In, NotIn,
+                                Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: values is an array of string values. If
+                                the operator is In or NotIn, the values array must
+                                be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced
+                                during a strategic merge patch.
+                              items:
+                                type: string
+                              type: array
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: matchLabels is a map of {key,value} pairs. A
+                          single {key,value} in the matchLabels map is equivalent
+                          to an element of matchExpressions, whose key field is "key",
+                          the operator is "In", and the values array contains only
+                          "value". The requirements are ANDed.
                         type: object
                     type: object
+                  serviceAccountName:
+                    description: ServiceAccountName is the admin specified service
+                      account which will be used to deploy operator(s) in this operator
+                      group.
+                    type: string
+                  staticProvidedAPIs:
+                    description: Static tells OLM not to update the OperatorGroup's
+                      providedAPIs annotation
+                    type: boolean
+                  targetNamespaces:
+                    description: TargetNamespaces is an explicit set of namespaces
+                      to target. If it is set, Selector is ignored.
+                    items:
+                      type: string
+                    type: array
+                    x-kubernetes-list-type: set
+                  upgradeStrategy:
+                    default: Default
+                    description: "UpgradeStrategy defines the upgrade strategy for
+                      operators in the namespace. There are currently two supported
+                      upgrade strategies: \n Default: OLM will only allow clusterServiceVersions
+                      to move to the replacing phase from the succeeded phase. This
+                      effectively means that OLM will not allow operators to move
+                      to the next version if an installation or upgrade has failed.
+                      \n TechPreviewUnsafeFailForward: OLM will allow clusterServiceVersions
+                      to move to the replacing phase from the succeeded phase or from
+                      the failed phase. Additionally, OLM will generate new installPlans
+                      when a subscription references a failed installPlan and the
+                      catalog has been updated with a new upgrade for the existing
+                      set of operators. \n WARNING: The TechPreviewUnsafeFailForward
+                      upgrade strategy is unsafe and may result in unexpected behavior
+                      or unrecoverable data loss unless you have deep understanding
+                      of the set of operators being managed in the namespace."
+                    enum:
+                    - Default
+                    - TechPreviewUnsafeFailForward
+                    type: string
                 type: object
               remediationAction:
                 description: 'RemediationAction : enforce or inform'
@@ -3266,48 +3281,53 @@ spec:
                   - type
                   type: object
                 type: array
-              relatedObject:
+              relatedObjects:
                 description: List of resources processed by the policy
-                properties:
-                  compliant:
-                    type: string
-                  object:
-                    description: ObjectResource is an object identified by the policy
-                      as a resource that needs to be validated.
-                    properties:
-                      apiVersion:
-                        description: API version of the referent.
-                        type: string
-                      kind:
-                        description: 'Kind of the referent. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
-                        type: string
-                      metadata:
-                        description: Metadata values from the referent.
-                        properties:
-                          name:
-                            description: 'Name of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names'
-                            type: string
-                          namespace:
-                            description: 'Namespace of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/'
-                            type: string
-                        type: object
-                    type: object
+                items:
+                  description: RelatedObject is the list of objects matched by this
+                    Policy resource.
                   properties:
+                    compliant:
+                      type: string
+                    object:
+                      description: ObjectResource is an object identified by the policy
+                        as a resource that needs to be validated.
+                      properties:
+                        apiVersion:
+                          description: API version of the referent.
+                          type: string
+                        kind:
+                          description: 'Kind of the referent. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+                          type: string
+                        metadata:
+                          description: Metadata values from the referent.
+                          properties:
+                            name:
+                              description: 'Name of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names'
+                              type: string
+                            namespace:
+                              description: 'Namespace of the referent. More info:
+                                https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/'
+                              type: string
+                          type: object
+                      type: object
                     properties:
-                      createdByPolicy:
-                        description: Whether the object was created by the parent
-                          policy
-                        type: boolean
-                      uid:
-                        description: Store object UID to help track object ownership
-                          for deletion
-                        type: string
-                    type: object
-                  reason:
-                    type: string
-                type: object
+                      properties:
+                        createdByPolicy:
+                          description: Whether the object was created by the parent
+                            policy
+                          type: boolean
+                        uid:
+                          description: Store object UID to help track object ownership
+                            for deletion
+                          type: string
+                      type: object
+                    reason:
+                      type: string
+                  type: object
+                type: array
             required:
-            - relatedObject
+            - relatedObjects
             type: object
         type: object
     served: true

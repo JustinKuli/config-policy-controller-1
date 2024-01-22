@@ -4,7 +4,8 @@
 package v1beta1
 
 import (
-	operatorv1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
+	operatorv1 "github.com/operator-framework/api/pkg/operators/v1"
+	operatorv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	policyv1 "open-cluster-management.io/config-policy-controller/api/v1"
@@ -36,35 +37,20 @@ const (
 	DeleteIfUnused RemovalAction = "DeleteIfUnused"
 )
 
-type TargetNsOrSelector struct {
-	// 'namespaces' and 'selector' both define an array/set of target namespaces that
-	// should be affected on the cluster. Only one of 'namespaces' or 'selector'
-	// should be specified, and if both are set then 'selector' will be omitted.
-	Namespace []string `json:"namespaces,omitempty"`
-	// 'namespaces' and 'selector' both define an array/set of target namespaces that
-	// should be affected on the cluster. Only one of 'namespaces' or 'selector'
-	// should be specified, and if both are set then 'selector' will be omitted.
-	Selector *metav1.LabelSelector `json:"selector,omitempty"`
-}
-
 // OperatorGroup specifies an OLM OperatorGroup. More info:
 // https://olm.operatorframework.io/docs/concepts/crds/operatorgroup/
 type OperatorGroup struct {
+	operatorv1.OperatorGroupSpec `json:",inline"`
 	// Name of the referent
 	Name string `json:"name,omitempty"`
 	// Namespace of the referent
 	Namespace string `json:"namespace,omitempty"`
-	// Target namespaces of the referent
-	Target TargetNsOrSelector `json:"target,omitempty"`
-	// Name of the OLM ServiceAccount that defines permissions for member operators
-	// +optional
-	ServiceAccountName string `json:"serviceAccountName,omitempty"`
 }
 
 // SubscriptionSpec extends an OLM subscription with a namespace field. More info:
 // https://olm.operatorframework.io/docs/concepts/crds/subscription/
 type SubscriptionSpec struct {
-	operatorv1.SubscriptionSpec `json:",inline"`
+	operatorv1alpha1.SubscriptionSpec `json:",inline"`
 	// Namespace of the referent
 	Namespace string `json:"namespace,omitempty"`
 }
@@ -118,9 +104,34 @@ type OperatorPolicyStatus struct {
 	// Most recent compliance state of the policy
 	ComplianceState policyv1.ComplianceState `json:"compliant,omitempty"`
 	// Historic details on the condition of the policy
-	Condition []metav1.Condition `json:"conditions,omitempty"`
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 	// List of resources processed by the policy
-	RelatedObject policyv1.RelatedObject `json:"relatedObject"`
+	RelatedObjects []policyv1.RelatedObject `json:"relatedObjects"`
+}
+
+func (status OperatorPolicyStatus) RelatedObjsOfKind(kind string) map[int]policyv1.RelatedObject {
+	objs := make(map[int]policyv1.RelatedObject)
+
+	for i, related := range status.RelatedObjects {
+		if related.Object.Kind == kind {
+			objs[i] = related
+		}
+	}
+
+	return objs
+}
+
+// Searches the conditions of the policy, and returns the index and condition matching the
+// given condition Type. It will return -1 as the index if no condition of the specified
+// Type is found.
+func (status OperatorPolicyStatus) GetCondition(condType string) (int, metav1.Condition) {
+	for i, cond := range status.Conditions {
+		if cond.Type == condType {
+			return i, cond
+		}
+	}
+
+	return -1, metav1.Condition{}
 }
 
 //+kubebuilder:object:root=true
