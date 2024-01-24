@@ -2,7 +2,7 @@ resources:
 - policy.open-cluster-management.io_operatorpolicies.yaml
 
 patches:
-# The OperatorPolicy has fewer allowed ComplianceTypes than ConfigurationPolicy
+# The OperatorPolicy currently only supports "musthave"
 - path: allowed-compliance-types.json
   target:
     group: apiextensions.k8s.io

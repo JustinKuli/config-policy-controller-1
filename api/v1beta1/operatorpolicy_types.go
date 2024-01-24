@@ -4,9 +4,8 @@
 package v1beta1
 
 import (
-	operatorv1 "github.com/operator-framework/api/pkg/operators/v1"
-	operatorv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 
 	policyv1 "open-cluster-management.io/config-policy-controller/api/v1"
 )
@@ -37,24 +36,6 @@ const (
 	DeleteIfUnused RemovalAction = "DeleteIfUnused"
 )
 
-// OperatorGroup specifies an OLM OperatorGroup. More info:
-// https://olm.operatorframework.io/docs/concepts/crds/operatorgroup/
-type OperatorGroup struct {
-	operatorv1.OperatorGroupSpec `json:",inline"`
-	// Name of the referent
-	Name string `json:"name,omitempty"`
-	// Namespace of the referent
-	Namespace string `json:"namespace,omitempty"`
-}
-
-// SubscriptionSpec extends an OLM subscription with a namespace field. More info:
-// https://olm.operatorframework.io/docs/concepts/crds/subscription/
-type SubscriptionSpec struct {
-	operatorv1alpha1.SubscriptionSpec `json:",inline"`
-	// Namespace of the referent
-	Namespace string `json:"namespace,omitempty"`
-}
-
 // RemovalBehavior defines resource behavior when policy is removed
 type RemovalBehavior struct {
 	// Kind OperatorGroup
@@ -84,14 +65,21 @@ type OperatorPolicySpec struct {
 	Severity          policyv1.Severity          `json:"severity,omitempty"`          // low, medium, high
 	RemediationAction policyv1.RemediationAction `json:"remediationAction,omitempty"` // inform, enforce
 	ComplianceType    policyv1.ComplianceType    `json:"complianceType"`              // musthave, mustnothave
-	// OperatorGroup requires at least 1 of target namespaces, or label selectors
-	// to be set to scope member operators' namespaced permissions. If both are provided,
-	// only the target namespace will be used and the label selector will be omitted.
+
+	// Include the name, namespace, and any `spec` fields for the OperatorGroup.
+	// For more info, see `kubectl explain operatorgroup.spec` or
+	// https://olm.operatorframework.io/docs/concepts/crds/operatorgroup/
+	// +kubebuilder:pruning:PreserveUnknownFields
 	// +optional
-	OperatorGroup *OperatorGroup `json:"operatorGroup,omitempty"`
-	// Subscription defines an Application that can be installed
+	OperatorGroup *runtime.RawExtension `json:"operatorGroup,omitempty"`
+
+	// Include the namespace, and any `spec` fields for the Subscription.
+	// For more info, see `kubectl explain subscription.spec` or
+	// https://olm.operatorframework.io/docs/concepts/crds/subscription/
 	// +kubebuilder:validation:Required
-	Subscription SubscriptionSpec `json:"subscription"`
+	// +kubebuilder:pruning:PreserveUnknownFields
+	Subscription runtime.RawExtension `json:"subscription"`
+
 	// Versions is a list of nonempty strings that specifies which installed versions are compliant when
 	// in 'inform' mode, and which installPlans are approved when in 'enforce' mode
 	Versions        []policyv1.NonEmptyString `json:"versions,omitempty"`
