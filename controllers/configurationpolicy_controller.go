@@ -37,7 +37,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
 	kubeopenapivalidation "k8s.io/kube-openapi/pkg/util/proto/validation"
 	"k8s.io/kubectl/pkg/util/openapi"
@@ -186,7 +185,6 @@ type ConfigurationPolicyReconciler struct {
 	// where the controller is running.
 	TargetK8sClient        kubernetes.Interface
 	TargetK8sDynamicClient dynamic.Interface
-	TargetK8sConfig        *rest.Config
 	SelectorReconciler     common.SelectorReconciler
 	// Whether custom metrics collection is enabled
 	EnableMetrics bool
@@ -1145,7 +1143,9 @@ func (r *ConfigurationPolicyReconciler) handleTemplatization(
 
 		resolveOptions.Watcher = &objID
 	} else {
-		tmplResolver, err = templates.NewResolver(r.TargetK8sConfig, templates.Config{})
+		tmplResolver, err = templates.NewResolverWithClients(
+			r.TargetK8sDynamicClient, r.TargetK8sClient.Discovery(), templates.Config{},
+		)
 	}
 
 	if err != nil {

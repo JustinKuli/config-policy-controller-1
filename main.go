@@ -483,7 +483,6 @@ func main() {
 		InstanceName:           instanceName,
 		TargetK8sClient:        targetK8sClient,
 		TargetK8sDynamicClient: targetK8sDynamicClient,
-		TargetK8sConfig:        targetK8sConfig,
 		SelectorReconciler:     &nsSelReconciler,
 		EnableMetrics:          opts.enableMetrics,
 		UninstallMode:          beingUninstalled,
