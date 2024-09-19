@@ -28,6 +28,7 @@ import (
 	extensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	extensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	apimachinerymeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -204,6 +205,7 @@ type ConfigurationPolicyReconciler struct {
 	// This is a workaround to account for race conditions where the status is updated but the controller-runtime cache
 	// has not updated yet.
 	lastEvaluatedCache sync.Map
+	RestMapper         apimachinerymeta.RESTMapper
 }
 
 //+kubebuilder:rbac:groups=*,resources=*,verbs=*
@@ -1909,6 +1911,16 @@ func (r *ConfigurationPolicyReconciler) getMapping(
 		log.Error(err, "Can not get mapping for object")
 
 		return depclient.ScopedGVR{}, err
+	}
+
+	if r.RestMapper != nil {
+		mapping, err := r.RestMapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+		if err == nil {
+			return depclient.ScopedGVR{
+				GroupVersionResource: mapping.Resource,
+				Namespaced:           mapping.Scope.Name() == apimachinerymeta.RESTScopeNameNamespace,
+			}, nil
+		}
 	}
 
 	scopedGVR, err := r.DynamicWatcher.GVKToGVR(gvk)
