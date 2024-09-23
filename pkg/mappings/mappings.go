@@ -6,7 +6,6 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 
@@ -149,8 +148,7 @@ func GenerateMappings(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	//nolint:forbidigo
-	fmt.Println(string(out))
+	cmd.Println(string(out))
 
 	return nil
 }
