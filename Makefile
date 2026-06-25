@@ -84,6 +84,14 @@ build:
 build-cmd: manifests
 	go build -o build/_output/bin/dryrun ./cmd/dryrun
 
+.PHONY: build-web
+build-web:
+	cd web && npm run build
+
+.PHONY: build-cmd-ui
+build-cmd-ui: build-web manifests
+	go build -tags embedui -o build/_output/bin/dryrun ./cmd/dryrun
+
 ############################################################
 # images section
 ############################################################

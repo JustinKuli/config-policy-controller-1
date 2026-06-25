@@ -91,16 +91,44 @@ const resultsEditor = createEditor(
   { readOnly: true, highlightYaml: false },
 )
 
-document.getElementById('run-btn').addEventListener('click', () => {
-  // Placeholder until the dryrun API is wired up.
-  setEditorContent(
-    resultsEditor,
-    `# Dryrun API not connected yet.
+document.getElementById('run-btn').addEventListener('click', async () => {
+  const runBtn = document.getElementById('run-btn')
+  runBtn.disabled = true
 
-Policy length: ${policyEditor.state.doc.length} characters
-Resources length: ${resourcesEditor.state.doc.length} characters
+  try {
+    const response = await fetch('/api/evaluate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        policy: policyEditor.state.doc.toString(),
+        resources: resourcesEditor.state.doc.toString(),
+      }),
+    })
 
-Click "Run dryrun" again once the backend is wired up.
+    const data = await response.json()
+
+    if (!response.ok || data.error) {
+      setEditorContent(
+        resultsEditor,
+        `# Error (${response.status})
+
+${data.error ?? 'Unknown error'}
 `,
-  )
+      )
+
+      return
+    }
+
+    setEditorContent(resultsEditor, data.output)
+  } catch (err) {
+    setEditorContent(
+      resultsEditor,
+      `# Request failed
+
+${err.message}
+`,
+    )
+  } finally {
+    runBtn.disabled = false
+  }
 })
