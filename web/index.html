@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ConfigurationPolicy dryrun</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <main class="editors">
+      <section class="pane">
+        <h2 class="pane-title">Policy</h2>
+        <p class="hint">
+          The <code>ConfigurationPolicy</code> to evaluate.
+        </p>
+        <div id="policy-editor" class="editor editor-scroll"></div>
+      </section>
+
+      <section class="pane">
+        <h2 class="pane-title">Cluster resources</h2>
+        <p class="hint">
+          YAML objects to simulate cluster state. Separate multiple documents with
+          <code>---</code>.
+        </p>
+        <div id="resources-editor" class="editor editor-scroll"></div>
+      </section>
+    </main>
+
+    <section class="results-section">
+      <div class="pane-header">
+        <h2 class="pane-title">Results</h2>
+        <button type="button" id="run-btn" class="run-btn">Run dryrun</button>
+      </div>
+      <div class="results-body">
+        <div id="results-editor" class="editor editor-scroll"></div>
+      </div>
+    </section>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
