@@ -66,38 +66,22 @@ func (d *DryRunner) dryRun(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithCancel(cmd.Context())
 	defer cancel()
 
-	rec, err := d.setupReconciler(ctx, cfgPolicy)
-	if err != nil {
-		return fmt.Errorf("unable to setup the dryrun reconciler: %w", err)
-	}
+	var inputObjects []*unstructured.Unstructured
 
 	if !d.fromCluster {
-		inputObjects, err := d.readInputResources(cmd, args)
+		inputObjects, err = d.readInputResources(cmd, args)
 		if err != nil {
 			return fmt.Errorf("unable to read input resources: %w", err)
 		}
-
-		err = d.applyInputResources(ctx, rec, inputObjects)
-		if err != nil {
-			return fmt.Errorf("unable to apply input resources: %w", err)
-		}
 	}
 
-	cfgPolicyNN := types.NamespacedName{
-		Name:      cfgPolicy.GetName(),
-		Namespace: cfgPolicy.GetNamespace(),
-	}
-
-	if _, err := rec.Reconcile(ctx, runtime.Request{NamespacedName: cfgPolicyNN}); err != nil {
-		return fmt.Errorf("unable to complete the dryrun reconcile: %w", err)
-	}
-
-	if err := rec.Get(ctx, cfgPolicyNN, cfgPolicy); err != nil {
-		return fmt.Errorf("unable to get the resulting policy state: %w", err)
+	result, err := d.evaluate(ctx, cfgPolicy, inputObjects)
+	if err != nil && !errors.Is(err, ErrNonCompliant) {
+		return err
 	}
 
 	if d.desiredStatus != "" {
-		if err := d.compareStatus(cmd, cfgPolicy.Status); err != nil {
+		if err := d.compareStatus(cmd, result.Status); err != nil {
 			return fmt.Errorf("unable to compare desired status: %w", err)
 		}
 
@@ -105,20 +89,24 @@ func (d *DryRunner) dryRun(cmd *cobra.Command, args []string) error {
 	}
 
 	if d.statusPath != "" {
-		if err := d.saveStatus(cfgPolicy.Status); err != nil {
+		if err := d.saveStatus(result.Status); err != nil {
 			return fmt.Errorf("unable to save the resulting policy state: %w", err)
 		}
 	}
 
 	if d.printDiffs {
-		d.outputDiffs(cmd, cfgPolicy.Status)
+		writeDiffs(cmd.OutOrStdout(), result.Status, d.noColors)
 	}
 
-	if err := d.saveOrPrintComplianceMessages(ctx, cmd, rec.Client, cfgPolicy.Namespace); err != nil {
-		return fmt.Errorf("unable to save or print the compliance messages: %w", err)
+	if d.messagesPath != "" {
+		if err := d.saveComplianceMessages(result.Messages); err != nil {
+			return fmt.Errorf("unable to save the compliance messages: %w", err)
+		}
+	} else {
+		writeComplianceMessages(cmd.OutOrStdout(), result.Messages)
 	}
 
-	if cfgPolicy.Status.ComplianceState != policyv1.Compliant {
+	if errors.Is(err, ErrNonCompliant) {
 		return ErrNonCompliant
 	}
 
@@ -141,6 +129,14 @@ func (d *DryRunner) readPolicy(cmd *cobra.Command) (*policyv1.ConfigurationPolic
 		return nil, err
 	}
 
+	warn := func(msg string) {
+		cmd.Println(msg)
+	}
+
+	return parsePolicyYAML(policyBytes, warn)
+}
+
+func parsePolicyYAML(policyBytes []byte, warn func(string)) (*policyv1.ConfigurationPolicy, error) {
 	unstruct := unstructured.Unstructured{}
 
 	if err := k8syaml.UnmarshalStrict(policyBytes, &unstruct.Object); err != nil {
@@ -192,7 +188,9 @@ func (d *DryRunner) readPolicy(cmd *cobra.Command) (*policyv1.ConfigurationPolic
 			}
 
 			if cfgPolFound {
-				cmd.Println("Ignoring additional ConfigurationPolicy in input policy")
+				if warn != nil {
+					warn("Ignoring additional ConfigurationPolicy in input policy")
+				}
 
 				continue
 			}
@@ -296,44 +294,65 @@ func (d *DryRunner) readInputResources(cmd *cobra.Command, args []string) (
 			}
 		}
 
-		// This is complicated because sigs.k8s.io/yaml does not provide a decoder, which we need
-		// for extracting multiple objects from single files, but gopkg.in/yaml.v3 does not
-		// specially handle certain types as expected by kubernetes converters (for example, a
-		// converter might require `int64`, instead of just `int`). So this decodes twice, in order
-		// to get both behaviors.
+		objs, err := decodeResourcesReader(r, pathToPrint)
+		if err != nil {
+			return nil, err
+		}
 
-		d := yaml.NewDecoder(r)
+		rawInputs = append(rawInputs, objs...)
+	}
 
-		for {
-			var obj map[string]any
+	return rawInputs, nil
+}
 
-			err := d.Decode(&obj)
-			if err != nil {
-				if errors.Is(err, io.EOF) {
-					break
-				}
+func decodeResourcesReader(r io.Reader, sourceName string) ([]*unstructured.Unstructured, error) {
+	rawInputs := []*unstructured.Unstructured{}
 
-				return nil, fmt.Errorf("could not decode %v to YAML: %w", pathToPrint, err)
+	// This is complicated because sigs.k8s.io/yaml does not provide a decoder, which we need
+	// for extracting multiple objects from single files, but gopkg.in/yaml.v3 does not
+	// specially handle certain types as expected by kubernetes converters (for example, a
+	// converter might require `int64`, instead of just `int`). So this decodes twice, in order
+	// to get both behaviors.
+
+	d := yaml.NewDecoder(r)
+
+	for {
+		var obj map[string]any
+
+		err := d.Decode(&obj)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
 			}
 
-			objJSON, err := json.Marshal(obj)
-			if err != nil {
-				return nil, fmt.Errorf("could not re-marshal %v to JSON: %w", pathToPrint, err)
-			}
+			return nil, fmt.Errorf("could not decode %v to YAML: %w", sourceName, err)
+		}
 
-			var k8sObj unstructured.Unstructured
+		objJSON, err := json.Marshal(obj)
+		if err != nil {
+			return nil, fmt.Errorf("could not re-marshal %v to JSON: %w", sourceName, err)
+		}
 
-			if err := k8syaml.UnmarshalStrict(objJSON, &k8sObj); err != nil {
-				return nil, fmt.Errorf("could not re-un-marshal %v to kubernetes YAML: %w", pathToPrint, err)
-			}
+		var k8sObj unstructured.Unstructured
 
-			if obj != nil {
-				rawInputs = append(rawInputs, &k8sObj)
-			}
+		if err := k8syaml.UnmarshalStrict(objJSON, &k8sObj); err != nil {
+			return nil, fmt.Errorf("could not re-un-marshal %v to kubernetes YAML: %w", sourceName, err)
+		}
+
+		if obj != nil {
+			rawInputs = append(rawInputs, &k8sObj)
 		}
 	}
 
 	return rawInputs, nil
+}
+
+func decodeResourcesYAML(yamlContent string) ([]*unstructured.Unstructured, error) {
+	if strings.TrimSpace(yamlContent) == "" {
+		return nil, nil
+	}
+
+	return decodeResourcesReader(strings.NewReader(yamlContent), "input")
 }
 
 // applyInputResources applies the user's resources to the fake cluster
@@ -391,6 +410,10 @@ func (d *DryRunner) setupLogs(cmd *cobra.Command) error {
 		return errors.New("error: log-path cannot be set when log is false")
 	}
 
+	return d.configureLogs()
+}
+
+func (d *DryRunner) configureLogs() error {
 	if d.logPath != "" {
 		d.log = true
 	}
@@ -619,13 +642,11 @@ func (d *DryRunner) saveStatus(status policyv1.ConfigurationPolicyStatus) error 
 	return nil
 }
 
-func (d *DryRunner) saveOrPrintComplianceMessages(
-	ctx context.Context, cmd *cobra.Command, rec client.Client, ns string,
-) error {
+func collectComplianceMessages(ctx context.Context, rec client.Client, ns string) ([]string, error) {
 	events := corev1.EventList{}
 
 	if err := rec.List(ctx, &events, client.InNamespace(ns)); err != nil {
-		return err
+		return nil, err
 	}
 
 	messages := []string{}
@@ -636,28 +657,32 @@ func (d *DryRunner) saveOrPrintComplianceMessages(
 		}
 	}
 
-	if d.messagesPath != "" {
-		f, err := os.Create(d.messagesPath)
-		if err != nil {
-			return err
-		}
-
-		for _, msg := range messages {
-			fmt.Fprintln(f, msg)
-		}
-	} else {
-		cmd.Println("# Compliance messages:")
-
-		for _, msg := range messages {
-			cmd.Println(msg)
-		}
-	}
-
-	return nil
+	return messages, nil
 }
 
-func (d *DryRunner) outputDiffs(cmd *cobra.Command, status policyv1.ConfigurationPolicyStatus) {
-	cmd.Println("# Diffs:")
+func (d *DryRunner) saveComplianceMessages(messages []string) error {
+	f, err := os.Create(d.messagesPath)
+	if err != nil {
+		return err
+	}
+
+	for _, msg := range messages {
+		fmt.Fprintln(f, msg)
+	}
+
+	return f.Close()
+}
+
+func writeComplianceMessages(w io.Writer, messages []string) {
+	fmt.Fprintln(w, "# Compliance messages:")
+
+	for _, msg := range messages {
+		fmt.Fprintln(w, msg)
+	}
+}
+
+func writeDiffs(w io.Writer, status policyv1.ConfigurationPolicyStatus, noColors bool) {
+	fmt.Fprintln(w, "# Diffs:")
 
 	for _, relObj := range status.RelatedObjects {
 		obj := relObj.Object
@@ -667,13 +692,12 @@ func (d *DryRunner) outputDiffs(cmd *cobra.Command, status policyv1.Configuratio
 			name = obj.Metadata.Namespace + "/" + name
 		}
 
-		cmd.Printf("%v %v %v:\n", obj.APIVersion, obj.Kind, name)
+		fmt.Fprintf(w, "%v %v %v:\n", obj.APIVersion, obj.Kind, name)
 
 		if relObj.Properties == nil || relObj.Properties.Diff == "" {
-			cmd.Println() // Ensures a newline is printed
+			fmt.Fprintln(w)
 		} else {
-			// For long diff
-			cmd.Println(strings.TrimSuffix(addColorToDiff(relObj.Properties.Diff, d.noColors), "\n"))
+			fmt.Fprintln(w, strings.TrimSuffix(addColorToDiff(relObj.Properties.Diff, noColors), "\n"))
 		}
 	}
 }
@@ -742,4 +766,113 @@ func addSupportedResources(clientset *clientsetfake.Clientset) {
 			Verbs:        mappings.DefaultVerbs,
 		}},
 	})
+}
+
+// EvaluateInput holds YAML strings for policy and simulated cluster resources.
+type EvaluateInput struct {
+	PolicyYAML    string
+	ResourcesYAML string
+}
+
+// EvaluateResult holds the outcome of a dryrun evaluation.
+type EvaluateResult struct {
+	ComplianceState policyv1.ComplianceState
+	Status          policyv1.ConfigurationPolicyStatus
+	Messages        []string
+}
+
+// Output returns the formatted dryrun text shown in the CLI and web UI: diffs and
+// compliance messages.
+func (r EvaluateResult) Output(noColors, printDiffs bool) string {
+	var out strings.Builder
+
+	if printDiffs {
+		writeDiffs(&out, r.Status, noColors)
+	}
+
+	writeComplianceMessages(&out, r.Messages)
+
+	return out.String()
+}
+
+// Evaluate runs a ConfigurationPolicy against YAML cluster resources using default
+// dryrun options suitable for programmatic callers such as the web UI.
+func Evaluate(ctx context.Context, in EvaluateInput) (EvaluateResult, error) {
+	d := DryRunner{
+		noColors:   true,
+		printDiffs: true,
+	}
+
+	return d.EvaluateFromYAML(ctx, in)
+}
+
+// EvaluateFromYAML parses YAML inputs and runs dryrun using this DryRunner's options.
+func (d *DryRunner) EvaluateFromYAML(ctx context.Context, in EvaluateInput) (EvaluateResult, error) {
+	cfgPolicy, err := parsePolicyYAML([]byte(in.PolicyYAML), nil)
+	if err != nil {
+		return EvaluateResult{}, fmt.Errorf("unable to read input policy: %w", err)
+	}
+
+	var inputObjects []*unstructured.Unstructured
+
+	if !d.fromCluster {
+		inputObjects, err = decodeResourcesYAML(in.ResourcesYAML)
+		if err != nil {
+			return EvaluateResult{}, fmt.Errorf("unable to read input resources: %w", err)
+		}
+	}
+
+	return d.evaluate(ctx, cfgPolicy, inputObjects)
+}
+
+func (d *DryRunner) evaluate(
+	ctx context.Context,
+	cfgPolicy *policyv1.ConfigurationPolicy,
+	inputObjects []*unstructured.Unstructured,
+) (EvaluateResult, error) {
+	if err := d.configureLogs(); err != nil {
+		return EvaluateResult{}, fmt.Errorf("unable to setup the logging configuration: %w", err)
+	}
+
+	rec, err := d.setupReconciler(ctx, cfgPolicy)
+	if err != nil {
+		return EvaluateResult{}, fmt.Errorf("unable to setup the dryrun reconciler: %w", err)
+	}
+
+	if !d.fromCluster {
+		err = d.applyInputResources(ctx, rec, inputObjects)
+		if err != nil {
+			return EvaluateResult{}, fmt.Errorf("unable to apply input resources: %w", err)
+		}
+	}
+
+	cfgPolicyNN := types.NamespacedName{
+		Name:      cfgPolicy.GetName(),
+		Namespace: cfgPolicy.GetNamespace(),
+	}
+
+	if _, err := rec.Reconcile(ctx, runtime.Request{NamespacedName: cfgPolicyNN}); err != nil {
+		return EvaluateResult{}, fmt.Errorf("unable to complete the dryrun reconcile: %w", err)
+	}
+
+	if err := rec.Get(ctx, cfgPolicyNN, cfgPolicy); err != nil {
+		return EvaluateResult{}, fmt.Errorf("unable to get the resulting policy state: %w", err)
+	}
+
+	messages, err := collectComplianceMessages(ctx, rec.Client, cfgPolicy.Namespace)
+	if err != nil {
+		return EvaluateResult{}, fmt.Errorf("unable to collect compliance messages: %w", err)
+	}
+
+	result := EvaluateResult{
+		ComplianceState: cfgPolicy.Status.ComplianceState,
+		Status:          cfgPolicy.Status,
+		Messages:        messages,
+	}
+
+	if cfgPolicy.Status.ComplianceState != policyv1.Compliant {
+		return result, ErrNonCompliant
+	}
+
+	return result, nil
 }
