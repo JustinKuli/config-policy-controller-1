@@ -3,6 +3,7 @@ import { Decoration, EditorView, ViewPlugin, keymap } from '@codemirror/view'
 import { defaultKeymap, indentWithTab } from '@codemirror/commands'
 import { yaml } from '@codemirror/lang-yaml'
 import { basicSetup } from 'codemirror'
+import YAML from 'js-yaml'
 
 const SAMPLE_POLICY = `apiVersion: policy.open-cluster-management.io/v1
 kind: ConfigurationPolicy
@@ -191,6 +192,52 @@ function createResultsEditor(parent, initialDoc) {
   })
 }
 
+function setEditorContent(view, text) {
+  view.dispatch({
+    changes: { from: 0, to: view.state.doc.length, insert: text },
+  })
+}
+
+function stripEvaluationTimestamps(policyYaml) {
+  let doc
+
+  try {
+    doc = YAML.load(policyYaml)
+  } catch {
+    return policyYaml
+  }
+
+  if (doc && typeof doc === 'object' && doc.status && typeof doc.status === 'object') {
+    delete doc.status.lastEvaluated
+    delete doc.status.lastEvaluatedGeneration
+  }
+
+  return `${YAML.dump(doc, { indent: 2, lineWidth: -1, noRefs: true }).trimEnd()}\n`
+}
+
+function stripPolicyStatus(policyYaml) {
+  const lines = policyYaml.split('\n')
+  const statusLineIndex = lines.findIndex((line) => /^status:/.test(line))
+
+  if (statusLineIndex === -1) {
+    return policyYaml.replace(/\s+$/, '')
+  }
+
+  return lines.slice(0, statusLineIndex).join('\n').replace(/\s+$/, '')
+}
+
+function appendPolicyStatus(policyYaml, status) {
+  const specOnly = stripPolicyStatus(policyYaml)
+  const statusYaml = YAML.dump(
+    { status },
+    { indent: 2, lineWidth: -1, noRefs: true },
+  )
+    .trimEnd()
+    .replace(/^status:/, 'status: # (status will be replaced each run)')
+
+  return `${specOnly}\n${statusYaml}\n`
+}
+
 function setResultsContent(view, text, complianceState = null) {
   const themeState = complianceState === 'error' ? 'error' : complianceState
 
@@ -249,7 +296,7 @@ document.getElementById('run-btn').addEventListener('click', async () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        policy: policyEditor.state.doc.toString(),
+        policy: stripEvaluationTimestamps(policyEditor.state.doc.toString()),
         resources: resourcesEditor.state.doc.toString(),
       }),
     })
@@ -273,6 +320,11 @@ ${data.error ?? 'Unknown error'}
       resultsEditor,
       formatEvaluateResult(data),
       data.complianceState || 'Unknown',
+    )
+
+    setEditorContent(
+      policyEditor,
+      appendPolicyStatus(policyEditor.state.doc.toString(), data.status),
     )
   } catch (err) {
     setResultsContent(
