@@ -6,7 +6,10 @@
   },
   "type": "module",
   "scripts": {
+    "generate-examples": "node scripts/generate-examples.mjs",
+    "predev": "npm run generate-examples",
     "dev": "vite",
+    "prebuild": "npm run generate-examples",
     "build": "vite build",
     "preview": "vite preview"
   },

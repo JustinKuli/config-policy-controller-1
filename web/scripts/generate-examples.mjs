@@ -1,0 +1,223 @@
+#!/usr/bin/env node
+// Copyright Contributors to the Open Cluster Management project
+
+import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
+import YAML from 'js-yaml'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const repoRoot = path.resolve(__dirname, '../..')
+const outFile = path.join(__dirname, '../src/examples.generated.js')
+const testSourceRoot = path.join(repoRoot, 'test/dryrun')
+const collectionSourceRoot = path.join(__dirname, '../examples')
+
+function humanizeSegment(segment) {
+  return segment
+    .replace(/^test_/, '')
+    .split('_')
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}
+
+function formatExampleMeta(id) {
+  const parts = id.split('/')
+  const label = humanizeSegment(parts[parts.length - 1])
+  const group = parts.slice(0, -1).map(humanizeSegment).join(' · ') || 'Examples'
+
+  return { label, group }
+}
+
+function findScenarioDirs(root) {
+  const results = []
+
+  function walk(dir) {
+    const entries = fs.readdirSync(dir, { withFileTypes: true })
+
+    if (entries.some((entry) => entry.isFile() && entry.name === 'policy.yaml')) {
+      results.push(dir)
+
+      return
+    }
+
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        walk(path.join(dir, entry.name))
+      }
+    }
+  }
+
+  walk(root)
+
+  return results
+}
+
+function collectResources(dir) {
+  const entries = fs.readdirSync(dir, { withFileTypes: true })
+  const inputFiles = []
+
+  for (const entry of entries) {
+    if (!entry.name.startsWith('input')) {
+      continue
+    }
+
+    if (entry.name === 'input_stdin.yaml') {
+      continue
+    }
+
+    if (entry.isDirectory()) {
+      return { skip: true, reason: 'directory input' }
+    }
+
+    if (entry.isFile()) {
+      inputFiles.push(entry.name)
+    }
+  }
+
+  inputFiles.sort()
+
+  const parts = inputFiles.map((name) =>
+    fs.readFileSync(path.join(dir, name), 'utf8').trimEnd(),
+  )
+
+  return {
+    skip: false,
+    resources: parts.length ? `${parts.join('\n---\n')}\n` : '',
+  }
+}
+
+const POLICY_WRAPPER_COMMENTS = [
+  / # the policy-template spec\.remediationAction is overridden by the preceding parameter value for spec\.remediationAction\./g,
+  / # will be overridden by remediationAction in parent policy/g,
+]
+
+function cleanPolicyYaml(policy) {
+  return POLICY_WRAPPER_COMMENTS.reduce(
+    (yaml, pattern) => yaml.replace(pattern, ''),
+    policy,
+  )
+}
+
+function loadScenario(dir) {
+  const id = path.relative(repoRoot, dir).split(path.sep).join('/')
+
+  if (fs.existsSync(path.join(dir, 'error.txt'))) {
+    return null
+  }
+
+  if (fs.existsSync(path.join(dir, 'mappings.yaml'))) {
+    return null
+  }
+
+  const resourcesResult = collectResources(dir)
+  if (resourcesResult.skip) {
+    console.warn(`skip ${id}: ${resourcesResult.reason}`)
+    return null
+  }
+
+  const policy = cleanPolicyYaml(
+    fs.readFileSync(path.join(dir, 'policy.yaml'), 'utf8').trimEnd(),
+  ) + '\n'
+
+  const { label, group } = formatExampleMeta(id)
+
+  return {
+    id,
+    label,
+    group,
+    policy,
+    resources: resourcesResult.resources,
+  }
+}
+
+function generateTestExamples() {
+  if (!fs.existsSync(testSourceRoot)) {
+    console.warn(`skip missing source tree: ${testSourceRoot}`)
+    return []
+  }
+
+  const examples = findScenarioDirs(testSourceRoot)
+    .map((dir) => loadScenario(dir))
+    .filter(Boolean)
+
+  examples.sort((a, b) => a.id.localeCompare(b.id))
+
+  return examples
+}
+
+function loadCollectionExample(dir) {
+  const policyPath = path.join(dir, 'policy.yaml')
+
+  if (!fs.existsSync(policyPath)) {
+    console.warn(`skip ${path.relative(repoRoot, dir)}: missing policy.yaml`)
+    return null
+  }
+
+  const policy = fs.readFileSync(policyPath, 'utf8').trimEnd() + '\n'
+
+  let label
+  try {
+    const doc = YAML.load(policy)
+    label = doc?.metadata?.labels?.description
+  } catch (err) {
+    console.warn(
+      `skip ${path.relative(repoRoot, dir)}: could not parse policy.yaml (${err.message})`,
+    )
+    return null
+  }
+
+  if (!label) {
+    console.warn(
+      `skip ${path.relative(repoRoot, dir)}: policy.yaml must set metadata.labels.description`,
+    )
+    return null
+  }
+
+  const resourcesPath = path.join(dir, 'resources.yaml')
+  const resources = fs.existsSync(resourcesPath)
+    ? `${fs.readFileSync(resourcesPath, 'utf8').trimEnd()}\n`
+    : ''
+
+  return {
+    id: `collection/${path.basename(dir)}`,
+    label,
+    policy,
+    resources,
+  }
+}
+
+function generateCollectionExamples() {
+  if (!fs.existsSync(collectionSourceRoot)) {
+    return []
+  }
+
+  const examples = fs
+    .readdirSync(collectionSourceRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => loadCollectionExample(path.join(collectionSourceRoot, entry.name)))
+    .filter(Boolean)
+
+  examples.sort((a, b) => a.label.localeCompare(b.label))
+
+  return examples
+}
+
+function writeExamplesFile(collectionExamples, testExamples) {
+  fs.writeFileSync(
+    outFile,
+    `// Generated by web/scripts/generate-examples.mjs — do not edit.
+export const collectionExamples = ${JSON.stringify(collectionExamples, null, 2)}
+
+export const testExamples = ${JSON.stringify(testExamples, null, 2)}
+`,
+    'utf8',
+  )
+}
+
+const collectionExamples = generateCollectionExamples()
+const testExamples = generateTestExamples()
+writeExamplesFile(collectionExamples, testExamples)
+console.log(
+  `Wrote ${collectionExamples.length} collection and ${testExamples.length} test examples to ${path.relative(repoRoot, outFile)}`,
+)

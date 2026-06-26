@@ -7,6 +7,24 @@
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
+    <header class="toolbar">
+      <div class="example-picker">
+        <span class="example-picker-label">Example</span>
+        <div class="example-menu">
+          <button
+            type="button"
+            id="example-menu-toggle"
+            class="example-menu-toggle"
+            aria-expanded="false"
+            aria-haspopup="listbox"
+          >
+            Load an example…
+          </button>
+          <div id="example-menu-panel" class="example-menu-panel" hidden></div>
+        </div>
+      </div>
+    </header>
+
     <main class="editors">
       <section class="pane">
         <h2 class="pane-title">Policy</h2>

@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sample-nginx-config
+  namespace: default
+data:
+  image: nginx:1.18.0
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sample-nginx-pod
+  namespace: default
+spec:
+  containers:
+    - image: nginx:1.17.9
+      name: nginx
+      ports:
+        - containerPort: 80

@@ -84,8 +84,12 @@ build:
 build-cmd: manifests
 	go build -o build/_output/bin/dryrun ./cmd/dryrun
 
+.PHONY: generate-examples
+generate-examples:
+	cd web && npm run generate-examples
+
 .PHONY: build-web
-build-web:
+build-web: generate-examples
 	cd web && npm run build
 
 .PHONY: build-cmd-ui

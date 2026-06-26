@@ -4,6 +4,7 @@ import { defaultKeymap, indentWithTab } from '@codemirror/commands'
 import { yaml } from '@codemirror/lang-yaml'
 import { basicSetup } from 'codemirror'
 import YAML from 'js-yaml'
+import { collectionExamples, testExamples } from './examples.generated.js'
 
 const SAMPLE_POLICY = `apiVersion: policy.open-cluster-management.io/v1
 kind: ConfigurationPolicy
@@ -157,6 +158,7 @@ function createEditor(parent, initialDoc, { readOnly = false, highlightYaml = tr
       '&': { height: '100%' },
       '.cm-content': { caretColor: readOnly ? 'transparent' : undefined },
     }),
+    EditorView.lineWrapping,
   ]
 
   if (highlightYaml) {
@@ -185,6 +187,7 @@ function createResultsEditor(parent, initialDoc) {
         basicSetup,
         keymap.of([...defaultKeymap, indentWithTab]),
         EditorState.readOnly.of(true),
+        EditorView.lineWrapping,
         diffSectionHighlighter,
         resultsThemeCompartment.of(complianceResultsTheme(null)),
       ],
@@ -286,6 +289,168 @@ const resultsEditor = createResultsEditor(
   document.getElementById('results-editor'),
   PLACEHOLDER_RESULTS,
 )
+
+function createExampleGroup(group, groupExamples) {
+  const details = document.createElement('details')
+  details.className = 'example-group'
+
+  const summary = document.createElement('summary')
+  summary.textContent = group
+  details.appendChild(summary)
+
+  const list = document.createElement('ul')
+  list.className = 'example-group-list'
+
+  for (const example of groupExamples.sort((a, b) => a.label.localeCompare(b.label))) {
+    const item = document.createElement('li')
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'example-option'
+    button.textContent = example.label
+    button.dataset.exampleId = example.id
+    button.dataset.exampleSection = 'From Tests'
+    item.appendChild(button)
+    list.appendChild(item)
+  }
+
+  details.appendChild(list)
+
+  return details
+}
+
+function createExampleSection(title, body) {
+  const section = document.createElement('details')
+  section.className = 'example-section'
+
+  const summary = document.createElement('summary')
+  summary.textContent = title
+  section.appendChild(summary)
+
+  const sectionBody = document.createElement('div')
+  sectionBody.className = 'example-section-body'
+  sectionBody.append(body)
+  section.appendChild(sectionBody)
+
+  return section
+}
+
+function populateExampleMenu() {
+  const panel = document.getElementById('example-menu-panel')
+  panel.replaceChildren()
+
+  const collectionBody = document.createDocumentFragment()
+
+  if (collectionExamples.length === 0) {
+    const empty = document.createElement('p')
+    empty.className = 'example-empty'
+    empty.textContent = 'No curated examples yet.'
+    collectionBody.append(empty)
+  } else {
+    const list = document.createElement('ul')
+    list.className = 'example-group-list'
+
+    for (const example of collectionExamples) {
+      const item = document.createElement('li')
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.className = 'example-option'
+      button.textContent = example.label
+      button.dataset.exampleId = example.id
+      button.dataset.exampleSection = 'Collection'
+      item.appendChild(button)
+      list.appendChild(item)
+    }
+
+    collectionBody.append(list)
+  }
+
+  panel.appendChild(createExampleSection('Collection', collectionBody))
+
+  const testsBody = document.createDocumentFragment()
+  const groups = new Map()
+
+  for (const example of testExamples) {
+    if (!groups.has(example.group)) {
+      groups.set(example.group, [])
+    }
+
+    groups.get(example.group).push(example)
+  }
+
+  for (const [group, groupExamples] of [...groups.entries()].sort((a, b) =>
+    a[0].localeCompare(b[0]),
+  )) {
+    testsBody.append(createExampleGroup(group, groupExamples))
+  }
+
+  panel.appendChild(createExampleSection('From Tests', testsBody))
+}
+
+function setExampleMenuOpen(open) {
+  const toggle = document.getElementById('example-menu-toggle')
+  const panel = document.getElementById('example-menu-panel')
+
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false')
+  panel.hidden = !open
+}
+
+function closeExampleMenu() {
+  setExampleMenuOpen(false)
+}
+
+function setupExampleMenu() {
+  const menu = document.querySelector('.example-menu')
+  const toggle = document.getElementById('example-menu-toggle')
+  const panel = document.getElementById('example-menu-panel')
+
+  toggle.addEventListener('click', () => {
+    setExampleMenuOpen(panel.hidden)
+  })
+
+  panel.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-example-id]')
+    if (!button) {
+      return
+    }
+
+    loadExample(button.dataset.exampleId)
+    toggle.textContent = `${button.dataset.exampleSection} · ${button.textContent}`
+    closeExampleMenu()
+  })
+
+  document.addEventListener('click', (event) => {
+    if (!menu.contains(event.target)) {
+      closeExampleMenu()
+    }
+  })
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      closeExampleMenu()
+    }
+  })
+}
+
+function findExample(exampleId) {
+  return (
+    collectionExamples.find((item) => item.id === exampleId) ??
+    testExamples.find((item) => item.id === exampleId)
+  )
+}
+
+function loadExample(exampleId) {
+  const example = findExample(exampleId)
+  if (!example) {
+    return
+  }
+
+  setEditorContent(policyEditor, example.policy)
+  setEditorContent(resourcesEditor, example.resources)
+  setResultsContent(resultsEditor, PLACEHOLDER_RESULTS, null)
+}
+
+populateExampleMenu()
+setupExampleMenu()
 
 document.getElementById('run-btn').addEventListener('click', async () => {
   const runBtn = document.getElementById('run-btn')
