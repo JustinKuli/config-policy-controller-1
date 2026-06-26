@@ -9,10 +9,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	policyv1 "open-cluster-management.io/config-policy-controller/api/v1"
+	"open-cluster-management.io/config-policy-controller/pkg/dryrun"
 )
 
 const testPolicy = `apiVersion: policy.open-cluster-management.io/v1
@@ -72,26 +72,22 @@ func TestHandleEvaluateCompliant(t *testing.T) {
 		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	var resp evaluateResponse
+	var resp dryrun.EvaluateResult
 
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}
 
-	if resp.Error != "" {
-		t.Fatalf("unexpected error: %s", resp.Error)
-	}
-
-	if resp.ComplianceState != string(policyv1.Compliant) {
+	if resp.ComplianceState != policyv1.Compliant {
 		t.Fatalf("expected Compliant, got %q", resp.ComplianceState)
 	}
 
-	if !strings.Contains(resp.Output, "# Diffs:") {
-		t.Fatalf("expected diffs in output, got:\n%s", resp.Output)
+	if len(resp.Messages) == 0 {
+		t.Fatal("expected compliance messages")
 	}
 
-	if !strings.Contains(resp.Output, "# Compliance messages:") {
-		t.Fatalf("expected compliance messages in output, got:\n%s", resp.Output)
+	if len(resp.Status.RelatedObjects) == 0 {
+		t.Fatal("expected related objects in status")
 	}
 }
 
@@ -114,7 +110,7 @@ func TestHandleEvaluateInvalidPolicy(t *testing.T) {
 		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	var resp evaluateResponse
+	var resp evaluateErrorResponse
 
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)

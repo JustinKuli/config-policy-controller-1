@@ -138,10 +138,8 @@ type evaluateRequest struct {
 	Resources string `json:"resources"`
 }
 
-type evaluateResponse struct {
-	Output          string `json:"output"`
-	ComplianceState string `json:"complianceState"`
-	Error           string `json:"error,omitempty"`
+type evaluateErrorResponse struct {
+	Error string `json:"error"`
 }
 
 func handleEvaluate(w http.ResponseWriter, r *http.Request) {
@@ -172,12 +170,7 @@ func handleEvaluate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := evaluateResponse{
-		Output:          result.Output(true, true),
-		ComplianceState: string(result.ComplianceState),
-	}
-
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(w, http.StatusOK, result)
 }
 
 func readEvaluateBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
@@ -205,7 +198,7 @@ func evaluateErrorStatus(err error) int {
 }
 
 func writeEvaluateError(w http.ResponseWriter, status int, err error) {
-	writeJSON(w, status, evaluateResponse{Error: err.Error()})
+	writeJSON(w, status, evaluateErrorResponse{Error: err.Error()})
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

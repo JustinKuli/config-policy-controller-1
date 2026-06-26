@@ -14,6 +14,18 @@
   --accent: #2563eb;
   --accent-hover: #1d4ed8;
   --pane-height: 70vh;
+  --result-compliant-bg: #f3faf5;
+  --result-compliant-line: #15803d;
+  --result-noncompliant-bg: #fef5f5;
+  --result-noncompliant-line: #b91c1c;
+  --result-neutral-bg: #f8fafc;
+  --result-neutral-line: #64748b;
+  --diff-add-bg: #dbeafe;
+  --diff-add-text: #1d4ed8;
+  --diff-remove-bg: #ffebe9;
+  --diff-remove-text: #cf222e;
+  --diff-meta-bg: #f6f8fa;
+  --diff-meta-text: #57606a;
 }
 
 body {
@@ -111,6 +123,21 @@ body {
 
 .results-section {
   padding: 1rem 5rem 1.25rem;
+}
+
+.cm-diff-add {
+  background-color: var(--diff-add-bg);
+  color: var(--diff-add-text);
+}
+
+.cm-diff-remove {
+  background-color: var(--diff-remove-bg);
+  color: var(--diff-remove-text);
+}
+
+.cm-diff-header {
+  background-color: var(--diff-meta-bg);
+  color: var(--diff-meta-text);
 }
 
 @media (max-width: 900px) {

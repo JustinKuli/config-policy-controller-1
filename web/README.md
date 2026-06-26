@@ -85,14 +85,19 @@ Content-Type: application/json
 { "policy": "...", "resources": "..." }
 ```
 
-Response on success:
+Response on success (an `EvaluateResult`):
 
 ```json
-{ "output": "# Diffs:\n...", "complianceState": "Compliant" }
+{
+  "complianceState": "Compliant",
+  "status": { "compliant": "Compliant", "relatedObjects": [...] },
+  "messages": ["..."]
+}
 ```
 
-Non-compliant policies still return `200` with the full output;
-`complianceState` will be `NonCompliant`. Parse errors return `400`.
+Non-compliant policies still return `200` with the full result;
+`complianceState` will be `NonCompliant`. Parse errors return `400` with
+`{ "error": "..." }`.
 
 ## Layout
 

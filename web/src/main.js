@@ -1,5 +1,5 @@
-import { EditorState } from '@codemirror/state'
-import { EditorView, keymap } from '@codemirror/view'
+import { Compartment, EditorState, RangeSetBuilder } from '@codemirror/state'
+import { Decoration, EditorView, ViewPlugin, keymap } from '@codemirror/view'
 import { defaultKeymap, indentWithTab } from '@codemirror/commands'
 import { yaml } from '@codemirror/lang-yaml'
 import { basicSetup } from 'codemirror'
@@ -42,10 +42,111 @@ spec:
 
 const PLACEHOLDER_RESULTS = `# Results will appear here after you run dryrun.
 
-# Diffs:
-
 # Compliance messages:
+
+# Diffs:
 `
+
+const resultsThemeCompartment = new Compartment()
+
+const COMPLIANCE_STYLES = {
+  Compliant: {
+    background: 'var(--result-compliant-bg)',
+    lineColor: 'var(--result-compliant-line)',
+  },
+  NonCompliant: {
+    background: 'var(--result-noncompliant-bg)',
+    lineColor: 'var(--result-noncompliant-line)',
+  },
+  Unknown: {
+    background: 'var(--result-neutral-bg)',
+    lineColor: 'var(--result-neutral-line)',
+  },
+  error: {
+    background: 'var(--result-noncompliant-bg)',
+    lineColor: 'var(--result-noncompliant-line)',
+  },
+  default: {
+    background: 'var(--surface)',
+    lineColor: 'var(--text)',
+  },
+}
+
+function complianceResultsTheme(complianceState) {
+  const style = COMPLIANCE_STYLES[complianceState] ?? COMPLIANCE_STYLES.default
+
+  return EditorView.theme(
+    {
+      '&': {
+        height: '100%',
+        backgroundColor: style.background,
+      },
+      '.cm-content': { caretColor: 'transparent' },
+      '.cm-line:first-child': {
+        color: style.lineColor,
+        fontWeight: '600',
+      },
+    },
+    { dark: false },
+  )
+}
+
+function diffLineClass(text) {
+  if (text.startsWith('+++') || text.startsWith('---') || text.startsWith('@@')) {
+    return 'cm-diff-header'
+  }
+
+  if (text.startsWith('+')) {
+    return 'cm-diff-add'
+  }
+
+  if (text.startsWith('-')) {
+    return 'cm-diff-remove'
+  }
+
+  return null
+}
+
+function buildDiffDecorations(view) {
+  const builder = new RangeSetBuilder()
+  let inDiffs = false
+
+  for (let lineNo = 1; lineNo <= view.state.doc.lines; lineNo++) {
+    const line = view.state.doc.line(lineNo)
+    const text = line.text
+
+    if (text === '# Diffs:') {
+      inDiffs = true
+      continue
+    }
+
+    if (!inDiffs || text.length === 0) {
+      continue
+    }
+
+    const className = diffLineClass(text)
+    if (className) {
+      builder.add(line.from, line.from, Decoration.line({ class: className }))
+    }
+  }
+
+  return builder.finish()
+}
+
+const diffSectionHighlighter = ViewPlugin.fromClass(
+  class {
+    constructor(view) {
+      this.decorations = buildDiffDecorations(view)
+    }
+
+    update(update) {
+      if (update.docChanged) {
+        this.decorations = buildDiffDecorations(update.view)
+      }
+    }
+  },
+  { decorations: (plugin) => plugin.decorations },
+)
 
 function createEditor(parent, initialDoc, { readOnly = false, highlightYaml = true } = {}) {
   const extensions = [
@@ -74,10 +175,59 @@ function createEditor(parent, initialDoc, { readOnly = false, highlightYaml = tr
   })
 }
 
-function setEditorContent(view, text) {
+function createResultsEditor(parent, initialDoc) {
+  return new EditorView({
+    parent,
+    state: EditorState.create({
+      doc: initialDoc,
+      extensions: [
+        basicSetup,
+        keymap.of([...defaultKeymap, indentWithTab]),
+        EditorState.readOnly.of(true),
+        diffSectionHighlighter,
+        resultsThemeCompartment.of(complianceResultsTheme(null)),
+      ],
+    }),
+  })
+}
+
+function setResultsContent(view, text, complianceState = null) {
+  const themeState = complianceState === 'error' ? 'error' : complianceState
+
   view.dispatch({
     changes: { from: 0, to: view.state.doc.length, insert: text },
+    effects: resultsThemeCompartment.reconfigure(complianceResultsTheme(themeState)),
   })
+}
+
+function formatEvaluateResult(result) {
+  const state = result.complianceState || 'Unknown'
+  const lines = [`# ${state}`, '', '# Compliance messages:']
+
+  for (const msg of result.messages ?? []) {
+    lines.push(msg)
+  }
+
+  lines.push('', '# Diffs:')
+
+  for (const relObj of result.status?.relatedObjects ?? []) {
+    const obj = relObj.object ?? {}
+    const metadata = obj.metadata ?? {}
+    const name = metadata.namespace
+      ? `${metadata.namespace}/${metadata.name}`
+      : metadata.name ?? ''
+
+    lines.push(`${obj.apiVersion} ${obj.kind} ${name}:`)
+
+    const diff = relObj.properties?.diff
+    if (diff) {
+      lines.push(diff.replace(/\n$/, ''))
+    }
+
+    lines.push('')
+  }
+
+  return lines.join('\n')
 }
 
 const policyEditor = createEditor(document.getElementById('policy-editor'), SAMPLE_POLICY)
@@ -85,10 +235,9 @@ const resourcesEditor = createEditor(
   document.getElementById('resources-editor'),
   SAMPLE_RESOURCES,
 )
-const resultsEditor = createEditor(
+const resultsEditor = createResultsEditor(
   document.getElementById('results-editor'),
   PLACEHOLDER_RESULTS,
-  { readOnly: true, highlightYaml: false },
 )
 
 document.getElementById('run-btn').addEventListener('click', async () => {
@@ -108,25 +257,31 @@ document.getElementById('run-btn').addEventListener('click', async () => {
     const data = await response.json()
 
     if (!response.ok || data.error) {
-      setEditorContent(
+      setResultsContent(
         resultsEditor,
         `# Error (${response.status})
 
 ${data.error ?? 'Unknown error'}
 `,
+        'error',
       )
 
       return
     }
 
-    setEditorContent(resultsEditor, data.output)
+    setResultsContent(
+      resultsEditor,
+      formatEvaluateResult(data),
+      data.complianceState || 'Unknown',
+    )
   } catch (err) {
-    setEditorContent(
+    setResultsContent(
       resultsEditor,
       `# Request failed
 
 ${err.message}
 `,
+      'error',
     )
   } finally {
     runBtn.disabled = false

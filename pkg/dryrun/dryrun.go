@@ -776,13 +776,12 @@ type EvaluateInput struct {
 
 // EvaluateResult holds the outcome of a dryrun evaluation.
 type EvaluateResult struct {
-	ComplianceState policyv1.ComplianceState
-	Status          policyv1.ConfigurationPolicyStatus
-	Messages        []string
+	ComplianceState policyv1.ComplianceState           `json:"complianceState"`
+	Status          policyv1.ConfigurationPolicyStatus `json:"status"`
+	Messages        []string                           `json:"messages"`
 }
 
-// Output returns the formatted dryrun text shown in the CLI and web UI: diffs and
-// compliance messages.
+// Output returns the formatted dryrun text shown in the CLI: diffs and compliance messages.
 func (r EvaluateResult) Output(noColors, printDiffs bool) string {
 	var out strings.Builder
 
