@@ -15,5 +15,10 @@ var dist embed.FS
 // Dist returns the embedded production web UI assets. It is only available in
 // binaries built with the embedui tag after running `npm run build` in web/.
 func Dist() fs.FS {
-	return dist
+	sub, err := fs.Sub(dist, "dist")
+	if err != nil {
+		panic(err)
+	}
+
+	return sub
 }

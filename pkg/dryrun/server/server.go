@@ -61,10 +61,7 @@ func Run(ctx context.Context, cfg Config) error {
 		cfg.Addr = ":8080"
 	}
 
-	handler, err := NewHandler(cfg)
-	if err != nil {
-		return err
-	}
+	handler := NewHandler(cfg)
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
@@ -97,7 +94,7 @@ func Run(ctx context.Context, cfg Config) error {
 }
 
 // NewHandler returns the HTTP handler for the dryrun API and optional static UI.
-func NewHandler(cfg Config) (http.Handler, error) {
+func NewHandler(cfg Config) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/evaluate", handleEvaluate)
 
@@ -105,30 +102,13 @@ func NewHandler(cfg Config) (http.Handler, error) {
 		mux.Handle("/", newStaticHandler(cfg.StaticFS))
 	}
 
-	return mux, nil
+	return mux
 }
 
 func newStaticHandler(fsys fs.FS) http.Handler {
-	fileServer := http.FileServer(http.FS(fsys))
+	fileServer := http.FileServerFS(fsys)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" && !strings.Contains(r.URL.Path, ".") {
-			index, err := fsys.Open("index.html")
-			if err != nil {
-				http.NotFound(w, r)
-
-				return
-			}
-
-			_ = index.Close()
-
-			r2 := r.Clone(r.Context())
-			r2.URL.Path = "/index.html"
-			fileServer.ServeHTTP(w, r2)
-
-			return
-		}
-
 		fileServer.ServeHTTP(w, r)
 	})
 }

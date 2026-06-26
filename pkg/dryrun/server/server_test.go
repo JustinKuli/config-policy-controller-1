@@ -56,11 +56,7 @@ spec:
 func TestHandleEvaluateCompliant(t *testing.T) {
 	t.Parallel()
 
-	handler, err := NewHandler(Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	handler := NewHandler(Config{})
 	body := marshalEvaluateRequest(t, testPolicy, testResources)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", bytes.NewReader(body))
@@ -94,11 +90,7 @@ func TestHandleEvaluateCompliant(t *testing.T) {
 func TestHandleEvaluateInvalidPolicy(t *testing.T) {
 	t.Parallel()
 
-	handler, err := NewHandler(Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	handler := NewHandler(Config{})
 	body := marshalEvaluateRequest(t, "not yaml: [", testResources)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", bytes.NewReader(body))
@@ -124,11 +116,7 @@ func TestHandleEvaluateInvalidPolicy(t *testing.T) {
 func TestHandleEvaluateMethodNotAllowed(t *testing.T) {
 	t.Parallel()
 
-	handler, err := NewHandler(Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	handler := NewHandler(Config{})
 	req := httptest.NewRequest(http.MethodGet, "/api/evaluate", nil)
 	rec := httptest.NewRecorder()
 
@@ -148,11 +136,7 @@ func TestNewHandlerStaticFS(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	handler, err := NewHandler(Config{StaticFS: os.DirFS(dir)})
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	handler := NewHandler(Config{StaticFS: os.DirFS(dir)})
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 
@@ -172,11 +156,7 @@ func TestNewHandlerAPIOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	handler, err := NewHandler(Config{StaticFS: os.DirFS(dir), APIOnly: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	handler := NewHandler(Config{StaticFS: os.DirFS(dir), APIOnly: true})
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 
