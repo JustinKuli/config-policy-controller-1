@@ -574,29 +574,49 @@ func (d *DryRunner) setupReconciler(
 
 	fakeClientset := clientset.(*clientsetfake.Clientset)
 
+	resourceLists, err := d.loadResourceLists()
+	if err != nil {
+		return nil, err
+	}
+
+	fakeClientset.Resources = resourceLists
+
+	// Add open-cluster-management policy CRD
+	addSupportedResources(fakeClientset)
+
+	return &rec, nil
+}
+
+func (d *DryRunner) loadResourceLists() ([]*metav1.APIResourceList, error) {
 	if d.mappingsPath != "" {
 		mFile, err := os.ReadFile(d.mappingsPath)
 		if err != nil {
 			return nil, err
 		}
 
-		apiMappings := []mappings.APIMapping{}
-		if err := k8syaml.Unmarshal(mFile, &apiMappings); err != nil {
-			return nil, err
-		}
-
-		fakeClientset.Resources = mappings.ResourceLists(apiMappings)
-	} else {
-		fakeClientset.Resources, err = mappings.DefaultResourceLists()
+		apiMappings, err := mappings.ParseAPIMappingsYAML(mFile)
 		if err != nil {
 			return nil, err
 		}
+
+		return mappings.ResourceLists(apiMappings), nil
 	}
 
-	// Add open-cluster-management policy CRD
-	addSupportedResources(fakeClientset)
+	apiMappings, err := mappings.DefaultMappings()
+	if err != nil {
+		return nil, err
+	}
 
-	return &rec, nil
+	if strings.TrimSpace(d.additionalMappingsYAML) != "" {
+		additional, err := mappings.ParseAPIMappingsYAML([]byte(d.additionalMappingsYAML))
+		if err != nil {
+			return nil, fmt.Errorf("unable to read additional API mappings: %w", err)
+		}
+
+		apiMappings = mappings.MergeAPIMappings(apiMappings, additional)
+	}
+
+	return mappings.ResourceLists(apiMappings), nil
 }
 
 func (d *DryRunner) compareStatus(cmd *cobra.Command, status policyv1.ConfigurationPolicyStatus) error {
@@ -770,8 +790,9 @@ func addSupportedResources(clientset *clientsetfake.Clientset) {
 
 // EvaluateInput holds YAML strings for policy and simulated cluster resources.
 type EvaluateInput struct {
-	PolicyYAML    string
-	ResourcesYAML string
+	PolicyYAML             string
+	ResourcesYAML          string
+	AdditionalMappingsYAML string
 }
 
 // EvaluateResult holds the outcome of a dryrun evaluation.
@@ -798,8 +819,9 @@ func (r EvaluateResult) Output(noColors, printDiffs bool) string {
 // dryrun options suitable for programmatic callers such as the web UI.
 func Evaluate(ctx context.Context, in EvaluateInput) (EvaluateResult, error) {
 	d := DryRunner{
-		noColors:   true,
-		printDiffs: true,
+		noColors:               true,
+		printDiffs:             true,
+		additionalMappingsYAML: in.AdditionalMappingsYAML,
 	}
 
 	return d.EvaluateFromYAML(ctx, in)

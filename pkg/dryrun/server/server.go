@@ -116,8 +116,9 @@ func newStaticHandler(fsys fs.FS) http.Handler {
 }
 
 type evaluateRequest struct {
-	Policy    string `json:"policy"`
-	Resources string `json:"resources"`
+	Policy             string `json:"policy"`
+	Resources          string `json:"resources"`
+	AdditionalMappings string `json:"additionalMappings,omitempty"`
 }
 
 type evaluateErrorResponse struct {
@@ -143,8 +144,9 @@ func handleEvaluate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := dryrun.Evaluate(r.Context(), dryrun.EvaluateInput{
-		PolicyYAML:    req.Policy,
-		ResourcesYAML: req.Resources,
+		PolicyYAML:             req.Policy,
+		ResourcesYAML:          req.Resources,
+		AdditionalMappingsYAML: req.AdditionalMappings,
 	})
 	if err != nil && !errors.Is(err, dryrun.ErrNonCompliant) {
 		writeEvaluateError(w, evaluateErrorStatus(err), err)
@@ -244,7 +246,8 @@ func evaluateErrorStatus(err error) int {
 
 	if strings.Contains(msg, "unable to read input policy") ||
 		strings.Contains(msg, "unable to read input resources") ||
-		strings.Contains(msg, "unable to apply input resources") {
+		strings.Contains(msg, "unable to apply input resources") ||
+		strings.Contains(msg, "unable to read additional API mappings") {
 		return http.StatusBadRequest
 	}
 

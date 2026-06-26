@@ -83,15 +83,73 @@ var defaultMappings []byte
 // DefaultResourceLists returns APIResourceLists which can be used in a fake
 // discovery client.
 func DefaultResourceLists() ([]*metav1.APIResourceList, error) {
+	mappings, err := DefaultMappings()
+	if err != nil {
+		return nil, err
+	}
+
+	return ResourceLists(mappings), nil
+}
+
+// DefaultMappings returns the embedded default API mappings.
+func DefaultMappings() ([]APIMapping, error) {
 	mappings := []APIMapping{}
 
 	if err := yaml.Unmarshal(defaultMappings, &mappings); err != nil {
 		return nil, err
 	}
 
-	resList := ResourceLists(mappings)
+	return mappings, nil
+}
 
-	return resList, nil
+// ParseAPIMappingsYAML parses a YAML document containing API mappings.
+func ParseAPIMappingsYAML(yamlContent []byte) ([]APIMapping, error) {
+	if len(strings.TrimSpace(string(yamlContent))) == 0 {
+		return nil, nil
+	}
+
+	mappings := []APIMapping{}
+
+	if err := yaml.Unmarshal(yamlContent, &mappings); err != nil {
+		return nil, err
+	}
+
+	return mappings, nil
+}
+
+// MergeAPIMappings returns base with additional mappings applied on top.
+// Entries with the same group, version, and kind replace earlier ones.
+func MergeAPIMappings(base, additional []APIMapping) []APIMapping {
+	if len(additional) == 0 {
+		return base
+	}
+
+	indexByKey := make(map[string]int, len(base))
+	merged := make([]APIMapping, len(base))
+	copy(merged, base)
+
+	for i, mapping := range merged {
+		indexByKey[mappingKey(mapping)] = i
+	}
+
+	for _, mapping := range additional {
+		key := mappingKey(mapping)
+
+		if i, ok := indexByKey[key]; ok {
+			merged[i] = mapping
+
+			continue
+		}
+
+		indexByKey[key] = len(merged)
+		merged = append(merged, mapping)
+	}
+
+	return merged
+}
+
+func mappingKey(mapping APIMapping) string {
+	return mapping.Group + "/" + mapping.Version + "/" + mapping.Kind
 }
 
 // GenerateMappings connects to a Kubernetes cluster and discovers the available

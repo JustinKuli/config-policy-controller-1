@@ -57,7 +57,10 @@ func TestHandleEvaluateCompliant(t *testing.T) {
 	t.Parallel()
 
 	handler := NewHandler(Config{})
-	body := marshalEvaluateRequest(t, testPolicy, testResources)
+	body := marshalEvaluateRequest(t, evaluateRequest{
+		Policy:    testPolicy,
+		Resources: testResources,
+	})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
@@ -91,7 +94,10 @@ func TestHandleEvaluateInvalidPolicy(t *testing.T) {
 	t.Parallel()
 
 	handler := NewHandler(Config{})
-	body := marshalEvaluateRequest(t, "not yaml: [", testResources)
+	body := marshalEvaluateRequest(t, evaluateRequest{
+		Policy:    "not yaml: [",
+		Resources: testResources,
+	})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
@@ -131,7 +137,10 @@ spec:
       ports:
         - containerPort: "not-a-number"
 `
-	body := marshalEvaluateRequest(t, testPolicy, invalidResources)
+	body := marshalEvaluateRequest(t, evaluateRequest{
+		Policy:    testPolicy,
+		Resources: invalidResources,
+	})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
@@ -150,6 +159,86 @@ spec:
 
 	if resp.Error == "" {
 		t.Fatal("expected error message in response")
+	}
+}
+
+func TestHandleEvaluateAdditionalMappings(t *testing.T) {
+	t.Parallel()
+
+	const additionalMappings = `- Group: ""
+  Kind: Fake
+  Plural: fakes
+  Scope: root
+  Singular: fake
+  Version: v1
+`
+	const policy = `apiVersion: policy.open-cluster-management.io/v1
+kind: ConfigurationPolicy
+metadata:
+  name: fake-policy
+  namespace: default
+spec:
+  remediationAction: inform
+  namespaceSelector:
+    include: ["default"]
+  object-templates:
+    - complianceType: musthave
+      objectDefinition:
+        apiVersion: v1
+        kind: Fake
+        metadata:
+          name: test-fake
+`
+	const resources = `apiVersion: v1
+kind: Fake
+metadata:
+  name: test-fake
+`
+
+	handler := NewHandler(Config{})
+	body := marshalEvaluateRequest(t, evaluateRequest{
+		Policy:             policy,
+		Resources:          resources,
+		AdditionalMappings: additionalMappings,
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dryrun.EvaluateResult
+
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+
+	if resp.ComplianceState != policyv1.Compliant {
+		t.Fatalf("expected Compliant, got %q", resp.ComplianceState)
+	}
+}
+
+func TestHandleEvaluateInvalidAdditionalMappings(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(Config{})
+	body := marshalEvaluateRequest(t, evaluateRequest{
+		Policy:             testPolicy,
+		Resources:          testResources,
+		AdditionalMappings: "not yaml: [",
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -207,13 +296,10 @@ func TestNewHandlerAPIOnly(t *testing.T) {
 	}
 }
 
-func marshalEvaluateRequest(t *testing.T, policy, resources string) []byte {
+func marshalEvaluateRequest(t *testing.T, req evaluateRequest) []byte {
 	t.Helper()
 
-	body, err := json.Marshal(evaluateRequest{
-		Policy:    policy,
-		Resources: resources,
-	})
+	body, err := json.Marshal(req)
 	if err != nil {
 		t.Fatal(err)
 	}

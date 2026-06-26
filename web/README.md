@@ -94,8 +94,12 @@ The server exposes two JSON endpoints.
 POST /api/evaluate
 Content-Type: application/json
 
-{ "policy": "...", "resources": "..." }
+{ "policy": "...", "resources": "...", "additionalMappings": "..." }
 ```
+
+`additionalMappings` is optional. When present, entries are merged with the
+server's built-in API mappings (same format as `dryrun generate` / `--mappings-file`).
+Omit it or leave the UI mappings tab empty to use defaults only.
 
 Response on success (an `EvaluateResult`):
 
@@ -109,8 +113,8 @@ Response on success (an `EvaluateResult`):
 
 Non-compliant policies still return `200` with the full result;
 `complianceState` will be `NonCompliant`. Client errors (malformed YAML, invalid
-resource field types, and similar input problems) return `400` with
-`{ "error": "..." }`. Unexpected server failures return `500`.
+resource field types, invalid additional API mappings, and similar input problems)
+return `400` with `{ "error": "..." }`. Unexpected server failures return `500`.
 
 The UI sends the full policy document (including any existing `status:` block) so
 `history` accumulates across runs, but strips `status.lastEvaluated` and
@@ -154,8 +158,9 @@ returns `400`; an empty issue list means no violations were found.
 │              [Load example ▼]│ [Copy share link]  status    │
 └──────────────────────────────┴──────────────────────────────┘
 ┌─────────────────────┬─────────────────────┐
-│ Policy              │ Cluster resources   │
-│ (YAML editor)       │ (YAML editor)       │
+│ Policy              │ Cluster             │
+│ (YAML editor)       │ [Resources|Mappings]│
+│                     │ (YAML editor)       │
 └─────────────────────┴─────────────────────┘
 ┌───────────────────────────────────────────┐
 │ Results   [Simulate]                      │
@@ -164,16 +169,19 @@ returns `400`; an empty issue list means no violations were found.
 ```
 
 - **Policy Playground** — page title with Open Cluster Management logo.
-- **Load an example…** — load a curated scenario or a `test/dryrun` case into both
-  editors.
-- **Copy share link** — gzip-compresses the current policy (spec only, no `status:`)
-  and cluster resources into the page URL hash (`#s=…`), copies the link, and updates
-  the address bar. Opening that link restores both editors. Links over ~8 KB show a
-  warning that some chat or email tools may truncate them.
+- **Load an example…** — load a curated scenario or a `test/dryrun` case into the
+  policy and resources editors; resets the API mappings tab to its placeholder.
+- **Copy share link** — gzip-compresses the current policy (spec only, no `status:`),
+  cluster resources, and any additional API mappings into the page URL hash (`#s=…`),
+  copies the link, and updates the address bar. Opening that link restores all three
+  editors. Links over ~8 KB show a warning that some chat or email tools may truncate
+  them. Mappings are omitted from the link when the tab is empty.
 - **Policy** — the `ConfigurationPolicy` to evaluate. After a run, a `status:` section
   is appended below the spec (replaced on each run).
-- **Cluster resources** — YAML documents simulating cluster state. Separate multiple
-  objects with `---`.
+- **Cluster** — tabbed pane with **Resources** (YAML documents simulating cluster
+  state; separate multiple objects with `---`) and **API mappings** (optional
+  additional mappings merged with server defaults on Simulate; same format as
+  `dryrun generate`).
 - **Results** — lint output (when present), then compliance state, messages, and diffs.
   Read-only, line-wrapped, with diff-line coloring.
 
@@ -193,7 +201,8 @@ Clicking **Simulate** runs lint first, then calls the evaluation API:
    output or API errors when present.
 5. If template lint is unavailable (for example the API is unreachable), the UI shows
    a notice and continues with browser lint and evaluation.
-6. **Evaluate** via `POST /api/evaluate` when there are no lint errors.
+6. **Evaluate** via `POST /api/evaluate` when there are no lint errors. Sends
+   `additionalMappings` when the API mappings tab contains mapping entries.
 7. Append `status:` to the policy editor on success; lint markers on the spec are
    preserved. The appended status block is excluded from lint on subsequent runs.
 

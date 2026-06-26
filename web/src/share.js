@@ -23,14 +23,18 @@ export function buildShareUrl(encodedPayload) {
   return `${origin}${pathname}${search}#${SHARE_HASH_PREFIX}${encodedPayload}`
 }
 
-export async function encodeShareState({ policy, resources }) {
-  const payload = JSON.stringify({
+export async function encodeShareState({ policy, resources, additionalMappings = '' }) {
+  const payload = {
     v: SHARE_VERSION,
     policy,
     resources,
-  })
+  }
 
-  const compressed = await gzipString(payload)
+  if (additionalMappings) {
+    payload.additionalMappings = additionalMappings
+  }
+
+  const compressed = await gzipString(JSON.stringify(payload))
 
   return bytesToBase64Url(compressed)
 }
@@ -51,6 +55,8 @@ export async function decodeShareState(encodedPayload) {
   return {
     policy: data.policy,
     resources: data.resources,
+    additionalMappings:
+      typeof data.additionalMappings === 'string' ? data.additionalMappings : '',
   }
 }
 

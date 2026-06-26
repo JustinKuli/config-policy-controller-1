@@ -42,20 +42,55 @@
 
     <main class="editors">
       <section class="pane">
-        <h2 class="pane-title">Policy</h2>
+        <div class="pane-chrome-head">
+          <h2 class="pane-title">Policy</h2>
+        </div>
         <p class="hint">
           The <code>ConfigurationPolicy</code> to evaluate.
         </p>
         <div id="policy-editor" class="editor editor-scroll"></div>
       </section>
 
-      <section class="pane">
-        <h2 class="pane-title">Cluster resources</h2>
-        <p class="hint">
-          YAML objects to simulate cluster state. Separate multiple documents with
-          <code>---</code>.
-        </p>
-        <div id="resources-editor" class="editor editor-scroll"></div>
+      <section class="pane pane-tabbed">
+        <div class="pane-chrome-head pane-header-tabs">
+          <h2 class="pane-title">Cluster</h2>
+          <div class="pane-tabs" role="tablist" aria-label="Cluster">
+            <button
+              type="button"
+              class="pane-tab is-active"
+              role="tab"
+              id="cluster-tab-resources"
+              aria-selected="true"
+              aria-controls="cluster-hint-resources cluster-editor-stack"
+            >
+              Resources
+            </button>
+            <button
+              type="button"
+              class="pane-tab"
+              role="tab"
+              id="cluster-tab-mappings"
+              aria-selected="false"
+              aria-controls="cluster-hint-mappings cluster-editor-stack"
+              tabindex="-1"
+            >
+              API mappings
+            </button>
+          </div>
+        </div>
+        <div class="pane-hint-stack">
+          <p class="hint" id="cluster-hint-resources">
+            YAML objects to simulate cluster state. Separate multiple documents with
+            <code>---</code>.
+          </p>
+          <p class="hint tab-hidden" id="cluster-hint-mappings">
+            Optional additional API mappings for Custom Resources.
+          </p>
+        </div>
+        <div id="cluster-editor-stack" class="pane-editor-stack">
+          <div id="resources-editor" class="editor editor-scroll"></div>
+          <div id="mappings-editor" class="editor editor-scroll tab-hidden"></div>
+        </div>
       </section>
     </main>
 

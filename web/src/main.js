@@ -62,6 +62,19 @@ spec:
         - containerPort: 80
 `
 
+const PLACEHOLDER_MAPPINGS = `# Additional API mappings (optional)
+# Merged with built-in defaults on Simulate.
+#
+# Generate from a cluster with: dryrun generate
+#
+# - group: example.com
+#   kind: Widget
+#   plural: widgets
+#   scope: namespace
+#   singular: widget
+#   version: v1
+`
+
 const PLACEHOLDER_RESULTS = `# Results will appear here after you click Simulate.
 
 # Compliance messages:
@@ -344,6 +357,7 @@ async function resolveInitialState() {
     return {
       policy: shared.policy,
       resources: shared.resources,
+      additionalMappings: shared.additionalMappings ?? '',
       loadedFromShare: true,
     }
   } catch (err) {
@@ -361,9 +375,89 @@ function getExportPolicyYaml() {
   return policy ? `${policy}\n` : ''
 }
 
+function hasMappingEntries(text) {
+  return /^\s*-\s+(group|Group):/m.test(text)
+}
+
+function getAdditionalMappingsYaml() {
+  const text = mappingsEditor.state.doc.toString().trimEnd()
+  if (!text || !hasMappingEntries(text)) {
+    return ''
+  }
+
+  return `${text}\n`
+}
+
+function buildEvaluateRequestBody(policyText, resourcesText) {
+  const body = {
+    policy: stripEvaluationTimestamps(policyText),
+    resources: resourcesText,
+  }
+  const additionalMappings = getAdditionalMappingsYaml()
+  if (additionalMappings) {
+    body.additionalMappings = additionalMappings
+  }
+
+  return body
+}
+
 let policyEditor
 let resourcesEditor
+let mappingsEditor
 let resultsEditor
+
+function setupClusterPaneTabs() {
+  const tabs = {
+    resources: {
+      tab: document.getElementById('cluster-tab-resources'),
+      hint: document.getElementById('cluster-hint-resources'),
+      editor: resourcesEditor,
+      editorMount: document.getElementById('resources-editor'),
+    },
+    mappings: {
+      tab: document.getElementById('cluster-tab-mappings'),
+      hint: document.getElementById('cluster-hint-mappings'),
+      editor: mappingsEditor,
+      editorMount: document.getElementById('mappings-editor'),
+    },
+  }
+
+  function activate(name) {
+    for (const [key, { tab, hint, editor, editorMount }] of Object.entries(tabs)) {
+      const active = key === name
+      tab.classList.toggle('is-active', active)
+      tab.setAttribute('aria-selected', String(active))
+      tab.tabIndex = active ? 0 : -1
+      hint.classList.toggle('tab-hidden', !active)
+      editorMount.classList.toggle('tab-hidden', !active)
+      if (active) {
+        requestAnimationFrame(() => {
+          editor.focus()
+        })
+      }
+    }
+  }
+
+  for (const [name, { tab }] of Object.entries(tabs)) {
+    tab.addEventListener('click', () => activate(name))
+  }
+
+  tabs.resources.tab.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowRight') {
+      event.preventDefault()
+      activate('mappings')
+      tabs.mappings.tab.focus()
+    }
+  })
+
+  tabs.mappings.tab.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault()
+      activate('resources')
+      tabs.resources.tab.focus()
+    }
+  })
+}
 
 function createExampleGroup(group, groupExamples) {
   const details = document.createElement('details')
@@ -521,6 +615,7 @@ function loadExample(exampleId) {
 
   setEditorContent(policyEditor, example.policy)
   setEditorContent(resourcesEditor, example.resources)
+  setEditorContent(mappingsEditor, PLACEHOLDER_MAPPINGS)
   clearLintDiagnostics(policyEditor)
   clearLintDiagnostics(resourcesEditor)
   setResultsContent(resultsEditor, PLACEHOLDER_RESULTS, null)
@@ -535,16 +630,26 @@ async function initializeApp() {
     document.getElementById('resources-editor'),
     initialState.resources,
   )
+  mappingsEditor = createEditor(
+    document.getElementById('mappings-editor'),
+    initialState.additionalMappings || PLACEHOLDER_MAPPINGS,
+  )
   resultsEditor = createResultsEditor(
     document.getElementById('results-editor'),
     PLACEHOLDER_RESULTS,
   )
 
+  setupClusterPaneTabs()
+
   populateExampleMenu()
   setupExampleMenu()
 
   if (initialState.loadedFromShare) {
-    setShareStatus('Loaded policy and resources from link.')
+    const parts = ['policy', 'resources']
+    if (initialState.additionalMappings) {
+      parts.push('mappings')
+    }
+    setShareStatus(`Loaded ${parts.join(' and ')} from link.`)
   } else if (initialState.shareError) {
     setShareStatus(`Could not load share link: ${initialState.shareError}`, 'error')
   }
@@ -557,6 +662,7 @@ async function initializeApp() {
       const encoded = await encodeShareState({
         policy: getExportPolicyYaml(),
         resources: resourcesEditor.state.doc.toString(),
+        additionalMappings: getAdditionalMappingsYaml(),
       })
       const url = buildShareUrl(encoded)
       const urlBytes = new TextEncoder().encode(url).length
@@ -617,10 +723,7 @@ async function initializeApp() {
       const response = await fetch('/api/evaluate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          policy: stripEvaluationTimestamps(policyText),
-          resources: resourcesText,
-        }),
+        body: JSON.stringify(buildEvaluateRequestBody(policyText, resourcesText)),
       })
 
       let data

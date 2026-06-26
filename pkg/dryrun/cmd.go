@@ -12,17 +12,18 @@ import (
 )
 
 type DryRunner struct {
-	policyPath    string
-	messagesPath  string
-	printDiffs    bool
-	statusPath    string
-	desiredStatus string
-	mappingsPath  string
-	log           bool
-	logPath       string
-	noColors      bool
-	fullDiffs     bool
-	fromCluster   bool
+	policyPath             string
+	messagesPath           string
+	printDiffs             bool
+	statusPath             string
+	desiredStatus          string
+	mappingsPath           string
+	additionalMappingsYAML string
+	log                    bool
+	logPath                string
+	noColors               bool
+	fullDiffs              bool
+	fromCluster            bool
 }
 
 var ErrNonCompliant = errors.New("policy is NonCompliant")
