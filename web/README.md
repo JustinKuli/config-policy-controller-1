@@ -4,14 +4,14 @@ Browser UI for the [dryrun](../pkg/dryrun/) CLI in this repository. Edit a
 `ConfigurationPolicy`, provide simulated cluster resources, and view compliance
 output in the browser.
 
-This is a mostly-vibe-coded work in progress.
-
 ## Stack
 
 - [Vite](https://vite.dev/) — dev server and production bundling
 - Vanilla JavaScript (no framework)
 - [CodeMirror 6](https://codemirror.net/) — YAML editors with syntax highlighting
+- [@codemirror/lint](https://codemirror.net/) — inline lint markers on Simulate
 - [js-yaml](https://github.com/nodeca/js-yaml) — policy/status serialization in the browser
+- [yaml](https://eemeli.org/yaml/) — YAML parse and lint (eemeli)
 - Go HTTP server in [`pkg/dryrun/server`](../pkg/dryrun/server/) — calls `dryrun.Evaluate()`
 
 ## Prerequisites
@@ -103,7 +103,8 @@ Response on success (an `EvaluateResult`):
 
 Non-compliant policies still return `200` with the full result;
 `complianceState` will be `NonCompliant`. Parse errors return `400` with
-`{ "error": "..." }`.
+`{ "error": "..." }`. Other server failures (for example invalid resource
+fields that pass YAML parsing) may return `500`.
 
 The UI sends the full policy document (including any existing `status:` block) so
 `history` accumulates across runs, but strips `status.lastEvaluated` and
@@ -137,11 +138,41 @@ The UI sends the full policy document (including any existing `status:` block) s
   is appended below the spec (replaced on each run).
 - **Cluster resources** — YAML documents simulating cluster state. Separate multiple
   objects with `---`.
-- **Results** — compliance state, messages, and diffs. Read-only, line-wrapped, with
-  diff-line coloring. **Simulate** runs evaluation via the API.
+- **Results** — lint output (when present), then compliance state, messages, and diffs.
+  Read-only, line-wrapped, with diff-line coloring.
 
 Editor panes use a fixed height (`--pane-height`, currently `70vh`) with internal
 scrolling. Adjust that variable in `src/style.css` to change pane sizing globally.
+
+## Simulate workflow
+
+Clicking **Simulate** runs lint first, then calls the evaluation API:
+
+1. **Lint** both editors (browser-only; nothing runs while you type).
+2. Show squiggles and gutter markers in the Policy and Cluster resources panes.
+3. **Errors** (syntax problems, empty policy) block simulation and fill the Results
+   pane with a `# Lint` section.
+4. **Warnings** (style rules below) do not block simulation. They appear in Results
+   alongside simulation output or API errors when present.
+5. **Evaluate** via `POST /api/evaluate` when there are no lint errors.
+6. Append `status:` to the policy editor on success; lint markers on the spec are
+   preserved.
+
+### Lint rules
+
+Implemented in [`src/lint.js`](src/lint.js) using the [yaml](https://eemeli.org/yaml/)
+parser plus lightweight style checks:
+
+| Severity | Rule |
+|----------|------|
+| Error | YAML syntax (strict parse), duplicate keys, empty policy document |
+| Warning | Trailing whitespace |
+| Warning | Tab characters |
+| Warning | Block sequence entries not starting with `"- "` (hyphens) |
+| Warning | Unquoted truthy scalars (`yes`, `no`, `on`, `off`, `true`, `false`, `y`, `n`) |
+
+Policy-specific lint (beyond what dryrun already validates at simulate time) is not
+implemented yet.
 
 ## Examples
 
@@ -178,7 +209,8 @@ web/
 ├── scripts/
 │   └── generate-examples.mjs
 ├── src/
-│   ├── main.js             # CodeMirror, API client, example menu
+│   ├── main.js             # CodeMirror, API client, example menu, Simulate flow
+│   ├── lint.js             # YAML lint rules and result formatting
 │   ├── share.js            # URL hash encode/decode and share status UI
 │   ├── style.css
 │   ├── ocm-logo-hept.png

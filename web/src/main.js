@@ -1,10 +1,17 @@
 import { Compartment, EditorState, RangeSetBuilder } from '@codemirror/state'
 import { Decoration, EditorView, ViewPlugin, keymap } from '@codemirror/view'
 import { defaultKeymap, indentWithTab } from '@codemirror/commands'
+import { lintGutter, setDiagnostics } from '@codemirror/lint'
 import { yaml } from '@codemirror/lang-yaml'
 import { basicSetup } from 'codemirror'
 import YAML from 'js-yaml'
 import { collectionExamples, testExamples } from './examples.generated.js'
+import {
+  formatCombinedResults,
+  formatLintResults,
+  hasLintErrors,
+  lintPlaygroundInputs,
+} from './lint.js'
 import {
   SHARE_LINK_WARN_BYTES,
   buildShareUrl,
@@ -164,6 +171,7 @@ function createEditor(parent, initialDoc, { readOnly = false, highlightYaml = tr
   const extensions = [
     basicSetup,
     keymap.of([...defaultKeymap, indentWithTab]),
+    lintGutter(),
     EditorView.theme({
       '&': { height: '100%' },
       '.cm-content': { caretColor: readOnly ? 'transparent' : undefined },
@@ -209,6 +217,45 @@ function setEditorContent(view, text) {
   view.dispatch({
     changes: { from: 0, to: view.state.doc.length, insert: text },
   })
+}
+
+function issuesToDiagnostics(view, issues) {
+  return issues.map((issue) => {
+    const lineNo = Math.min(Math.max(issue.line, 1), view.state.doc.lines)
+    const line = view.state.doc.line(lineNo)
+    const from = line.from + Math.max(0, issue.column - 1)
+    let to = issue.endColumn ? line.from + issue.endColumn - 1 : from + 1
+
+    if (to <= from) {
+      to = Math.min(from + 1, line.to)
+    }
+
+    return {
+      from,
+      to,
+      severity: issue.severity,
+      message: issue.message,
+    }
+  })
+}
+
+function applyLintDiagnostics(view, issues) {
+  view.dispatch(setDiagnostics(view.state, issuesToDiagnostics(view, issues)))
+}
+
+function clearLintDiagnostics(view) {
+  view.dispatch(setDiagnostics(view.state, []))
+}
+
+function applyPlaygroundLint(lintIssues) {
+  applyLintDiagnostics(
+    policyEditor,
+    lintIssues.filter((issue) => issue.source === 'Policy'),
+  )
+  applyLintDiagnostics(
+    resourcesEditor,
+    lintIssues.filter((issue) => issue.source === 'Resources'),
+  )
 }
 
 function stripEvaluationTimestamps(policyYaml) {
@@ -482,6 +529,8 @@ function loadExample(exampleId) {
 
   setEditorContent(policyEditor, example.policy)
   setEditorContent(resourcesEditor, example.resources)
+  clearLintDiagnostics(policyEditor)
+  clearLintDiagnostics(resourcesEditor)
   setResultsContent(resultsEditor, PLACEHOLDER_RESULTS, null)
   clearShareStatus()
 }
@@ -542,25 +591,46 @@ async function initializeApp() {
     const runBtn = document.getElementById('run-btn')
     runBtn.disabled = true
 
+    let lintIssues = []
+
     try {
+      const policyText = policyEditor.state.doc.toString()
+      const resourcesText = resourcesEditor.state.doc.toString()
+      lintIssues = lintPlaygroundInputs(policyText, resourcesText)
+
+      applyPlaygroundLint(lintIssues)
+
+      if (hasLintErrors(lintIssues)) {
+        setResultsContent(resultsEditor, formatLintResults(lintIssues), 'error')
+
+        return
+      }
+
       const response = await fetch('/api/evaluate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          policy: stripEvaluationTimestamps(policyEditor.state.doc.toString()),
-          resources: resourcesEditor.state.doc.toString(),
+          policy: stripEvaluationTimestamps(policyText),
+          resources: resourcesText,
         }),
       })
 
-      const data = await response.json()
+      let data
+      try {
+        data = await response.json()
+      } catch {
+        data = { error: 'Server returned a non-JSON response' }
+      }
 
       if (!response.ok || data.error) {
         setResultsContent(
           resultsEditor,
-          `# Error (${response.status})
+          formatCombinedResults(
+            lintIssues,
+            `# Error (${response.status})
 
-${data.error ?? 'Unknown error'}
-`,
+${data.error ?? 'Unknown error'}`,
+          ),
           'error',
         )
 
@@ -569,7 +639,7 @@ ${data.error ?? 'Unknown error'}
 
       setResultsContent(
         resultsEditor,
-        formatEvaluateResult(data),
+        formatCombinedResults(lintIssues, formatEvaluateResult(data)),
         data.complianceState || 'Unknown',
       )
 
@@ -577,13 +647,13 @@ ${data.error ?? 'Unknown error'}
         policyEditor,
         appendPolicyStatus(policyEditor.state.doc.toString(), data.status),
       )
+      applyPlaygroundLint(lintIssues)
     } catch (err) {
       setResultsContent(
         resultsEditor,
-        `# Request failed
+        formatCombinedResults(lintIssues, `# Request failed
 
-${err.message}
-`,
+${err.message}`),
         'error',
       )
     } finally {
