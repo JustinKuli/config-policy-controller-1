@@ -7,10 +7,13 @@ import { basicSetup } from 'codemirror'
 import YAML from 'js-yaml'
 import { collectionExamples, testExamples } from './examples.generated.js'
 import {
+  fetchPolicyLint,
   formatCombinedResults,
-  formatLintResults,
+  formatLintUnavailable,
   hasLintErrors,
   lintPlaygroundInputs,
+  mergeLintIssues,
+  stripPolicyStatus,
 } from './lint.js'
 import {
   SHARE_LINK_WARN_BYTES,
@@ -273,17 +276,6 @@ function stripEvaluationTimestamps(policyYaml) {
   }
 
   return `${YAML.dump(doc, { indent: 2, lineWidth: -1, noRefs: true }).trimEnd()}\n`
-}
-
-function stripPolicyStatus(policyYaml) {
-  const lines = policyYaml.split('\n')
-  const statusLineIndex = lines.findIndex((line) => /^status:/.test(line))
-
-  if (statusLineIndex === -1) {
-    return policyYaml.replace(/\s+$/, '')
-  }
-
-  return lines.slice(0, statusLineIndex).join('\n').replace(/\s+$/, '')
 }
 
 function appendPolicyStatus(policyYaml, status) {
@@ -596,12 +588,28 @@ async function initializeApp() {
     try {
       const policyText = policyEditor.state.doc.toString()
       const resourcesText = resourcesEditor.state.doc.toString()
-      lintIssues = lintPlaygroundInputs(policyText, resourcesText)
+      const browserIssues = lintPlaygroundInputs(policyText, resourcesText)
+      let lintUnavailable = null
+
+      try {
+        const serverIssues = await fetchPolicyLint(policyText)
+        lintIssues = mergeLintIssues(browserIssues, serverIssues)
+      } catch (err) {
+        lintUnavailable = err.message
+        lintIssues = browserIssues
+      }
 
       applyPlaygroundLint(lintIssues)
 
       if (hasLintErrors(lintIssues)) {
-        setResultsContent(resultsEditor, formatLintResults(lintIssues), 'error')
+        setResultsContent(
+          resultsEditor,
+          formatCombinedResults(
+            lintIssues,
+            lintUnavailable ? formatLintUnavailable(lintUnavailable) : '',
+          ),
+          'error',
+        )
 
         return
       }
@@ -627,7 +635,7 @@ async function initializeApp() {
           resultsEditor,
           formatCombinedResults(
             lintIssues,
-            `# Error (${response.status})
+            `${lintUnavailable ? `${formatLintUnavailable(lintUnavailable).trimEnd()}\n\n` : ''}# Error (${response.status})
 
 ${data.error ?? 'Unknown error'}`,
           ),
@@ -637,9 +645,13 @@ ${data.error ?? 'Unknown error'}`,
         return
       }
 
+      const evaluateBody = lintUnavailable
+        ? `${formatLintUnavailable(lintUnavailable).trimEnd()}\n\n${formatEvaluateResult(data)}`
+        : formatEvaluateResult(data)
+
       setResultsContent(
         resultsEditor,
-        formatCombinedResults(lintIssues, formatEvaluateResult(data)),
+        formatCombinedResults(lintIssues, evaluateBody),
         data.complianceState || 'Unknown',
       )
 
@@ -651,9 +663,12 @@ ${data.error ?? 'Unknown error'}`,
     } catch (err) {
       setResultsContent(
         resultsEditor,
-        formatCombinedResults(lintIssues, `# Request failed
+        formatCombinedResults(
+          lintIssues,
+          `# Request failed
 
-${err.message}`),
+${err.message}`,
+        ),
         'error',
       )
     } finally {

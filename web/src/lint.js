@@ -4,7 +4,7 @@ import { parseAllDocuments, parseDocument } from 'yaml'
 
 /**
  * @typedef {'error' | 'warning'} LintSeverity
- * @typedef {{ line: number, column: number, endColumn?: number, message: string, severity: LintSeverity, source: string }} LintIssue
+ * @typedef {{ line: number, column: number, endColumn?: number, message: string, severity: LintSeverity, source: string, ruleId?: string }} LintIssue
  */
 
 function issueFromError(error, source) {
@@ -201,8 +201,9 @@ export function formatLintResults(issues) {
 
   for (const issue of issues) {
     const label = issue.severity === 'warning' ? 'warning' : 'error'
+    const rule = issue.ruleId ? ` [${issue.ruleId}]` : ''
     lines.push(
-      `${issue.source} ${label} (line ${issue.line}, col ${issue.column}): ${issue.message}`,
+      `${issue.source} ${label}${rule} (line ${issue.line}, col ${issue.column}): ${issue.message}`,
     )
   }
 
@@ -230,7 +231,101 @@ export function hasLintErrors(issues) {
 
 export function lintPlaygroundInputs(policyText, resourcesText) {
   return [
-    ...lintYamlText(policyText, 'Policy'),
+    ...lintYamlText(stripPolicyStatus(policyText), 'Policy'),
     ...lintYamlDocuments(resourcesText, 'Resources'),
   ]
+}
+
+/**
+ * Return policy YAML without the top-level status block.
+ * @param {string} policyYaml
+ * @returns {string}
+ */
+export function stripPolicyStatus(policyYaml) {
+  const lines = policyYaml.split('\n')
+  const statusLineIndex = lines.findIndex((line) => /^status:/.test(line))
+
+  if (statusLineIndex === -1) {
+    return policyYaml.replace(/\s+$/, '')
+  }
+
+  return lines.slice(0, statusLineIndex).join('\n').replace(/\s+$/, '')
+}
+
+function normalizeServerSeverity(severity) {
+  return severity === 'error' ? 'error' : 'warning'
+}
+
+/**
+ * Map /api/lint response items to playground lint issues.
+ * @param {Array<{ line: number, column: number, severity: string, message: string, ruleId?: string, source?: string }>} apiIssues
+ * @returns {LintIssue[]}
+ */
+function mapServerLintIssues(apiIssues) {
+  return apiIssues.map((issue) => ({
+    line: issue.line,
+    column: issue.column,
+    message: issue.message,
+    severity: normalizeServerSeverity(issue.severity),
+    source: issue.source ?? 'Policy',
+    ruleId: issue.ruleId,
+  }))
+}
+
+/**
+ * Merge browser and server lint results, dropping duplicate trailing-whitespace
+ * warnings on the policy pane when the server already reported them.
+ * @param {LintIssue[]} browserIssues
+ * @param {LintIssue[]} serverIssues
+ * @returns {LintIssue[]}
+ */
+export function mergeLintIssues(browserIssues, serverIssues) {
+  const serverTrailingWhitespaceLines = new Set(
+    serverIssues
+      .filter((issue) => issue.ruleId === 'GTUL001')
+      .map((issue) => issue.line),
+  )
+
+  const filteredBrowser = browserIssues.filter((issue) => {
+    if (issue.source !== 'Policy' || issue.message !== 'Trailing whitespace') {
+      return true
+    }
+
+    return !serverTrailingWhitespaceLines.has(issue.line)
+  })
+
+  return [...filteredBrowser, ...serverIssues]
+}
+
+/**
+ * Run go-template-utils policy template lint via the dryrun server.
+ * @param {string} policyYaml
+ * @returns {Promise<LintIssue[]>}
+ */
+export async function fetchPolicyLint(policyYaml) {
+  const response = await fetch('/api/lint', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ policy: stripPolicyStatus(policyYaml) }),
+  })
+
+  let data
+  try {
+    data = await response.json()
+  } catch {
+    throw new Error('Server returned a non-JSON response')
+  }
+
+  if (!response.ok) {
+    throw new Error(data.error ?? `Request failed (${response.status})`)
+  }
+
+  return mapServerLintIssues(data.issues ?? [])
+}
+
+export function formatLintUnavailable(message) {
+  return `# Policy template lint unavailable
+
+${message}
+`
 }

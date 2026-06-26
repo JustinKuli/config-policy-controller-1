@@ -4,6 +4,9 @@ Browser UI for the [dryrun](../pkg/dryrun/) CLI in this repository. Edit a
 `ConfigurationPolicy`, provide simulated cluster resources, and view compliance
 output in the browser.
 
+Just a small word of warning: this playground was largely vibe-coded and may not
+be an ideal representation of how to do this (especially the JS parts).
+
 ## Stack
 
 - [Vite](https://vite.dev/) — dev server and production bundling
@@ -12,7 +15,8 @@ output in the browser.
 - [@codemirror/lint](https://codemirror.net/) — inline lint markers on Simulate
 - [js-yaml](https://github.com/nodeca/js-yaml) — policy/status serialization in the browser
 - [yaml](https://eemeli.org/yaml/) — YAML parse and lint (eemeli)
-- Go HTTP server in [`pkg/dryrun/server`](../pkg/dryrun/server/) — calls `dryrun.Evaluate()`
+- Go HTTP server in [`pkg/dryrun/server`](../pkg/dryrun/server/) — evaluation and
+  [go-template-utils](https://github.com/stolostron/go-template-utils) policy template lint
 
 ## Prerequisites
 
@@ -82,7 +86,9 @@ Open `http://localhost:8080`. No static directory or Node.js is required at runt
 
 ## API
 
-The server exposes a single evaluation endpoint:
+The server exposes two JSON endpoints.
+
+### Evaluate
 
 ```
 POST /api/evaluate
@@ -102,13 +108,43 @@ Response on success (an `EvaluateResult`):
 ```
 
 Non-compliant policies still return `200` with the full result;
-`complianceState` will be `NonCompliant`. Parse errors return `400` with
-`{ "error": "..." }`. Other server failures (for example invalid resource
-fields that pass YAML parsing) may return `500`.
+`complianceState` will be `NonCompliant`. Client errors (malformed YAML, invalid
+resource field types, and similar input problems) return `400` with
+`{ "error": "..." }`. Unexpected server failures return `500`.
 
 The UI sends the full policy document (including any existing `status:` block) so
 `history` accumulates across runs, but strips `status.lastEvaluated` and
 `status.lastEvaluatedGeneration` before each request so evaluation is not skipped.
+
+### Lint
+
+```
+POST /api/lint
+Content-Type: application/json
+
+{ "policy": "..." }
+```
+
+Response on success:
+
+```json
+{
+  "issues": [
+    {
+      "line": 11,
+      "column": 17,
+      "severity": "warning",
+      "message": "Templates should be single-quoted.",
+      "ruleId": "GTUL003",
+      "source": "Policy"
+    }
+  ]
+}
+```
+
+Linting uses [go-template-utils `pkg/lint`](https://github.com/stolostron/go-template-utils/tree/main/pkg/lint).
+The UI sends the policy spec only (no appended `status:` block). Malformed JSON
+returns `400`; an empty issue list means no violations were found.
 
 ## Layout
 
@@ -148,31 +184,48 @@ scrolling. Adjust that variable in `src/style.css` to change pane sizing globall
 
 Clicking **Simulate** runs lint first, then calls the evaluation API:
 
-1. **Lint** both editors (browser-only; nothing runs while you type).
+1. **Lint** both editors in the browser, and lint the policy spec via `POST /api/lint`.
+   Nothing runs while you type.
 2. Show squiggles and gutter markers in the Policy and Cluster resources panes.
-3. **Errors** (syntax problems, empty policy) block simulation and fill the Results
-   pane with a `# Lint` section.
-4. **Warnings** (style rules below) do not block simulation. They appear in Results
-   alongside simulation output or API errors when present.
-5. **Evaluate** via `POST /api/evaluate` when there are no lint errors.
-6. Append `status:` to the policy editor on success; lint markers on the spec are
-   preserved.
+3. **Errors** (YAML syntax, empty policy, template delimiter/variable errors) block
+   simulation and fill the Results pane with a `# Lint` section.
+4. **Warnings** do not block simulation. They appear in Results alongside simulation
+   output or API errors when present.
+5. If template lint is unavailable (for example the API is unreachable), the UI shows
+   a notice and continues with browser lint and evaluation.
+6. **Evaluate** via `POST /api/evaluate` when there are no lint errors.
+7. Append `status:` to the policy editor on success; lint markers on the spec are
+   preserved. The appended status block is excluded from lint on subsequent runs.
 
 ### Lint rules
 
-Implemented in [`src/lint.js`](src/lint.js) using the [yaml](https://eemeli.org/yaml/)
-parser plus lightweight style checks:
+Policy and cluster resources use different linters. The generated `status:` block
+appended after Simulate is never linted.
 
-| Severity | Rule |
-|----------|------|
-| Error | YAML syntax (strict parse), duplicate keys, empty policy document |
-| Warning | Trailing whitespace |
-| Warning | Tab characters |
-| Warning | Block sequence entries not starting with `"- "` (hyphens) |
-| Warning | Unquoted truthy scalars (`yes`, `no`, `on`, `off`, `true`, `false`, `y`, `n`) |
+**Browser lint** ([`src/lint.js`](src/lint.js)) — YAML syntax and style:
 
-Policy-specific lint (beyond what dryrun already validates at simulate time) is not
-implemented yet.
+| Severity | Source | Rule |
+|----------|--------|------|
+| Error | Policy, Resources | YAML syntax (strict parse), duplicate keys |
+| Error | Policy | Empty policy document |
+| Warning | Policy, Resources | Trailing whitespace |
+| Warning | Policy, Resources | Tab characters |
+| Warning | Policy, Resources | Block sequence entries not starting with `"- "` |
+| Warning | Policy, Resources | Unquoted truthy scalars (`yes`, `no`, `on`, `off`, `true`, `false`, `y`, `n`) |
+
+**Template lint** (`POST /api/lint`, go-template-utils) — policy spec only:
+
+| Severity | Rule ID | Rule |
+|----------|---------|------|
+| Warning | GTUL001 | Trailing whitespace |
+| Error | GTUL002 | Mismatched template delimiters (`{{`, `{{hub`, JSON `{}`) |
+| Warning | GTUL003 | Unquoted template expressions in YAML values |
+| Warning | GTUL004 | Unused template variables |
+| Error | GTUL005 | Invalid template variable syntax |
+| Warning | GTUL006 | Mismatched quotes around templates |
+
+When both linters report trailing whitespace on the same policy line, the browser
+warning is dropped in favor of the server result.
 
 ## Examples
 
@@ -210,7 +263,7 @@ web/
 │   └── generate-examples.mjs
 ├── src/
 │   ├── main.js             # CodeMirror, API client, example menu, Simulate flow
-│   ├── lint.js             # YAML lint rules and result formatting
+│   ├── lint.js             # Browser lint, server lint client, result formatting
 │   ├── share.js            # URL hash encode/decode and share status UI
 │   ├── style.css
 │   ├── ocm-logo-hept.png

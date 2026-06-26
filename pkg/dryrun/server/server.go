@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/stolostron/go-template-utils/v7/pkg/lint"
 	"open-cluster-management.io/config-policy-controller/pkg/dryrun"
 )
 
@@ -97,6 +98,7 @@ func Run(ctx context.Context, cfg Config) error {
 func NewHandler(cfg Config) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/evaluate", handleEvaluate)
+	mux.HandleFunc("POST /api/lint", handleLint)
 
 	if cfg.StaticFS != nil && !cfg.APIOnly {
 		mux.Handle("/", newStaticHandler(cfg.StaticFS))
@@ -151,6 +153,77 @@ func handleEvaluate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, result)
+}
+
+type lintRequest struct {
+	Policy string `json:"policy"`
+}
+
+type lintIssue struct {
+	Line     int    `json:"line"`
+	Column   int    `json:"column"`
+	Severity string `json:"severity"`
+	Message  string `json:"message"`
+	RuleID   string `json:"ruleId"`
+	Source   string `json:"source"`
+}
+
+type lintResponse struct {
+	Issues []lintIssue `json:"issues"`
+}
+
+func handleLint(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	body, err := readEvaluateBody(w, r)
+	if err != nil {
+		writeEvaluateError(w, http.StatusBadRequest, err)
+
+		return
+	}
+
+	var req lintRequest
+
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeEvaluateError(w, http.StatusBadRequest, fmt.Errorf("invalid JSON request body: %w", err))
+
+		return
+	}
+
+	violations := lint.Lint(req.Policy)
+	writeJSON(w, http.StatusOK, lintResponse{Issues: violationsToIssues(violations)})
+}
+
+func violationsToIssues(violations []lint.LinterRuleViolation) []lintIssue {
+	if len(violations) == 0 {
+		return []lintIssue{}
+	}
+
+	issues := make([]lintIssue, 0, len(violations))
+
+	for _, violation := range violations {
+		severity := "warning"
+
+		if metadata := lint.GetRuleMetadata(violation.RuleID); metadata != nil {
+			severity = metadata.Level
+		}
+
+		column := violation.Column
+		if column == 0 {
+			column = 1
+		}
+
+		issues = append(issues, lintIssue{
+			Line:     violation.LineNumber,
+			Column:   column,
+			Severity: severity,
+			Message:  violation.Message,
+			RuleID:   violation.RuleID,
+			Source:   "Policy",
+		})
+	}
+
+	return issues
 }
 
 func readEvaluateBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
