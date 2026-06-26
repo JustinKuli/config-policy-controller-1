@@ -312,11 +312,24 @@ function setResultsContent(view, text, complianceState = null) {
   })
 }
 
+function complianceMessagesForResult(result) {
+  if (result.messages?.length > 0) {
+    return result.messages
+  }
+
+  const historyMessage = result.status?.history?.[0]?.message
+  if (historyMessage) {
+    return [historyMessage]
+  }
+
+  return []
+}
+
 function formatEvaluateResult(result) {
   const state = result.complianceState || 'Unknown'
   const lines = [`# ${state}`, '', '# Compliance messages:']
 
-  for (const msg of result.messages ?? []) {
+  for (const msg of complianceMessagesForResult(result)) {
     lines.push(msg)
   }
 
