@@ -113,6 +113,46 @@ func TestHandleEvaluateInvalidPolicy(t *testing.T) {
 	}
 }
 
+func TestHandleEvaluateInvalidResources(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(Config{})
+	invalidResources := testResources + `
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bad-pod
+  namespace: default
+spec:
+  containers:
+    - image: nginx:1.7.9
+      name: nginx
+      ports:
+        - containerPort: "not-a-number"
+`
+	body := marshalEvaluateRequest(t, testPolicy, invalidResources)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp evaluateErrorResponse
+
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+
+	if resp.Error == "" {
+		t.Fatal("expected error message in response")
+	}
+}
+
 func TestHandleEvaluateMethodNotAllowed(t *testing.T) {
 	t.Parallel()
 

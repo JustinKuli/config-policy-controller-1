@@ -170,7 +170,8 @@ func evaluateErrorStatus(err error) int {
 	msg := err.Error()
 
 	if strings.Contains(msg, "unable to read input policy") ||
-		strings.Contains(msg, "unable to read input resources") {
+		strings.Contains(msg, "unable to read input resources") ||
+		strings.Contains(msg, "unable to apply input resources") {
 		return http.StatusBadRequest
 	}
 
