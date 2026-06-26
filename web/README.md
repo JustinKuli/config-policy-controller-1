@@ -1,8 +1,8 @@
-# ConfigurationPolicy dryrun web UI
+# Policy Playground
 
 Browser UI for the [dryrun](../pkg/dryrun/) CLI in this repository. Edit a
-`ConfigurationPolicy`, provide simulated cluster resources, and view dryrun output
-in the browser.
+`ConfigurationPolicy`, provide simulated cluster resources, and view compliance
+output in the browser.
 
 This is a mostly-vibe-coded work in progress.
 
@@ -42,7 +42,8 @@ Run these from the **repository root**:
 
 `make build-cmd-ui` requires `npm install` in `web/` first. The UI is embedded at
 compile time via `go:embed` in [`web/embed.go`](embed.go) (active only with the
-`embedui` build tag).
+`embedui` build tag). `Dist()` strips the `dist/` prefix so static assets are
+served from the filesystem root.
 
 ## Development
 
@@ -111,26 +112,33 @@ The UI sends the full policy document (including any existing `status:` block) s
 ## Layout
 
 ```
-┌───────────────────────────────────────────┐
-│ Example   [Load an example…]              │
-└───────────────────────────────────────────┘
+┌──────────────────────────────┬──────────────────────────────┐
+│ [logo] Policy Playground     │                              │
+│              [Load example ▼]│ [Copy share link]  status    │
+└──────────────────────────────┴──────────────────────────────┘
 ┌─────────────────────┬─────────────────────┐
 │ Policy              │ Cluster resources   │
 │ (YAML editor)       │ (YAML editor)       │
 └─────────────────────┴─────────────────────┘
 ┌───────────────────────────────────────────┐
-│ Results   [Run dryrun]                    │
+│ Results   [Simulate]                      │
 │ (read-only output)                        │
 └───────────────────────────────────────────┘
 ```
 
-- **Example** — load a curated scenario or a `test/dryrun` case into both editors.
+- **Policy Playground** — page title with Open Cluster Management logo.
+- **Load an example…** — load a curated scenario or a `test/dryrun` case into both
+  editors.
+- **Copy share link** — gzip-compresses the current policy (spec only, no `status:`)
+  and cluster resources into the page URL hash (`#s=…`), copies the link, and updates
+  the address bar. Opening that link restores both editors. Links over ~8 KB show a
+  warning that some chat or email tools may truncate them.
 - **Policy** — the `ConfigurationPolicy` to evaluate. After a run, a `status:` section
   is appended below the spec (replaced on each run).
 - **Cluster resources** — YAML documents simulating cluster state. Separate multiple
   objects with `---`.
 - **Results** — compliance state, messages, and diffs. Read-only, line-wrapped, with
-  diff-line coloring.
+  diff-line coloring. **Simulate** runs evaluation via the API.
 
 Editor panes use a fixed height (`--pane-height`, currently `70vh`) with internal
 scrolling. Adjust that variable in `src/style.css` to change pane sizing globally.
@@ -171,7 +179,9 @@ web/
 │   └── generate-examples.mjs
 ├── src/
 │   ├── main.js             # CodeMirror, API client, example menu
+│   ├── share.js            # URL hash encode/decode and share status UI
 │   ├── style.css
+│   ├── ocm-logo-hept.png
 │   └── examples.generated.js   # generated; gitignored
 ├── package.json
 ├── vite.config.js          # dev proxy for /api

@@ -5,6 +5,16 @@ import { yaml } from '@codemirror/lang-yaml'
 import { basicSetup } from 'codemirror'
 import YAML from 'js-yaml'
 import { collectionExamples, testExamples } from './examples.generated.js'
+import {
+  SHARE_LINK_WARN_BYTES,
+  buildShareUrl,
+  clearShareStatus,
+  decodeShareState,
+  encodeShareState,
+  formatShareSize,
+  readShareHash,
+  setShareStatus,
+} from './share.js'
 
 const SAMPLE_POLICY = `apiVersion: policy.open-cluster-management.io/v1
 kind: ConfigurationPolicy
@@ -42,7 +52,7 @@ spec:
         - containerPort: 80
 `
 
-const PLACEHOLDER_RESULTS = `# Results will appear here after you run dryrun.
+const PLACEHOLDER_RESULTS = `# Results will appear here after you click Simulate.
 
 # Compliance messages:
 
@@ -280,15 +290,41 @@ function formatEvaluateResult(result) {
   return lines.join('\n')
 }
 
-const policyEditor = createEditor(document.getElementById('policy-editor'), SAMPLE_POLICY)
-const resourcesEditor = createEditor(
-  document.getElementById('resources-editor'),
-  SAMPLE_RESOURCES,
-)
-const resultsEditor = createResultsEditor(
-  document.getElementById('results-editor'),
-  PLACEHOLDER_RESULTS,
-)
+async function resolveInitialState() {
+  const encoded = readShareHash()
+  if (!encoded) {
+    return {
+      policy: SAMPLE_POLICY,
+      resources: SAMPLE_RESOURCES,
+    }
+  }
+
+  try {
+    const shared = await decodeShareState(encoded)
+
+    return {
+      policy: shared.policy,
+      resources: shared.resources,
+      loadedFromShare: true,
+    }
+  } catch (err) {
+    return {
+      policy: SAMPLE_POLICY,
+      resources: SAMPLE_RESOURCES,
+      shareError: err.message,
+    }
+  }
+}
+
+function getExportPolicyYaml() {
+  const policy = stripPolicyStatus(policyEditor.state.doc.toString()).trimEnd()
+
+  return policy ? `${policy}\n` : ''
+}
+
+let policyEditor
+let resourcesEditor
+let resultsEditor
 
 function createExampleGroup(group, groupExamples) {
   const details = document.createElement('details')
@@ -447,60 +483,113 @@ function loadExample(exampleId) {
   setEditorContent(policyEditor, example.policy)
   setEditorContent(resourcesEditor, example.resources)
   setResultsContent(resultsEditor, PLACEHOLDER_RESULTS, null)
+  clearShareStatus()
 }
 
-populateExampleMenu()
-setupExampleMenu()
+async function initializeApp() {
+  const initialState = await resolveInitialState()
 
-document.getElementById('run-btn').addEventListener('click', async () => {
-  const runBtn = document.getElementById('run-btn')
-  runBtn.disabled = true
+  policyEditor = createEditor(document.getElementById('policy-editor'), initialState.policy)
+  resourcesEditor = createEditor(
+    document.getElementById('resources-editor'),
+    initialState.resources,
+  )
+  resultsEditor = createResultsEditor(
+    document.getElementById('results-editor'),
+    PLACEHOLDER_RESULTS,
+  )
 
-  try {
-    const response = await fetch('/api/evaluate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        policy: stripEvaluationTimestamps(policyEditor.state.doc.toString()),
+  populateExampleMenu()
+  setupExampleMenu()
+
+  if (initialState.loadedFromShare) {
+    setShareStatus('Loaded policy and resources from link.')
+  } else if (initialState.shareError) {
+    setShareStatus(`Could not load share link: ${initialState.shareError}`, 'error')
+  }
+
+  document.getElementById('export-btn').addEventListener('click', async () => {
+    const exportBtn = document.getElementById('export-btn')
+    exportBtn.disabled = true
+
+    try {
+      const encoded = await encodeShareState({
+        policy: getExportPolicyYaml(),
         resources: resourcesEditor.state.doc.toString(),
-      }),
-    })
+      })
+      const url = buildShareUrl(encoded)
+      const urlBytes = new TextEncoder().encode(url).length
 
-    const data = await response.json()
+      await navigator.clipboard.writeText(url)
+      history.replaceState(null, '', url)
 
-    if (!response.ok || data.error) {
-      setResultsContent(
-        resultsEditor,
-        `# Error (${response.status})
+      if (urlBytes > SHARE_LINK_WARN_BYTES) {
+        setShareStatus(
+          `Link copied (${formatShareSize(urlBytes)}) — may be too long for some apps`,
+          'warn',
+        )
+      } else {
+        setShareStatus(`Link copied (${formatShareSize(urlBytes)})`)
+      }
+    } catch (err) {
+      setShareStatus(`Could not copy share link: ${err.message}`, 'error')
+    } finally {
+      exportBtn.disabled = false
+    }
+  })
+
+  document.getElementById('run-btn').addEventListener('click', async () => {
+    const runBtn = document.getElementById('run-btn')
+    runBtn.disabled = true
+
+    try {
+      const response = await fetch('/api/evaluate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          policy: stripEvaluationTimestamps(policyEditor.state.doc.toString()),
+          resources: resourcesEditor.state.doc.toString(),
+        }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok || data.error) {
+        setResultsContent(
+          resultsEditor,
+          `# Error (${response.status})
 
 ${data.error ?? 'Unknown error'}
 `,
-        'error',
+          'error',
+        )
+
+        return
+      }
+
+      setResultsContent(
+        resultsEditor,
+        formatEvaluateResult(data),
+        data.complianceState || 'Unknown',
       )
 
-      return
-    }
-
-    setResultsContent(
-      resultsEditor,
-      formatEvaluateResult(data),
-      data.complianceState || 'Unknown',
-    )
-
-    setEditorContent(
-      policyEditor,
-      appendPolicyStatus(policyEditor.state.doc.toString(), data.status),
-    )
-  } catch (err) {
-    setResultsContent(
-      resultsEditor,
-      `# Request failed
+      setEditorContent(
+        policyEditor,
+        appendPolicyStatus(policyEditor.state.doc.toString(), data.status),
+      )
+    } catch (err) {
+      setResultsContent(
+        resultsEditor,
+        `# Request failed
 
 ${err.message}
 `,
-      'error',
-    )
-  } finally {
-    runBtn.disabled = false
-  }
-})
+        'error',
+      )
+    } finally {
+      runBtn.disabled = false
+    }
+  })
+}
+
+initializeApp()

@@ -9,6 +9,7 @@
   --surface: #f8fafc;
   --border: #c5d0de;
   --title: #1e5a8a;
+  --app-title: #0f2744;
   --text: #1f2937;
   --muted: #64748b;
   --accent: #2563eb;
@@ -37,30 +38,98 @@ body {
 }
 
 .toolbar {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 1rem;
   padding: 0.75rem 3rem 0;
+  align-items: stretch;
 }
 
-.example-picker {
+.toolbar-half-examples {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.toolbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  min-width: 0;
+}
+
+.toolbar-logo {
+  width: 2.5rem;
+  height: 2.5rem;
+  flex-shrink: 0;
+  display: block;
+}
+
+.toolbar-title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--app-title);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.toolbar-half-share {
+  display: flex;
+  justify-content: flex-start;
+  align-items: flex-end;
+  min-width: 0;
+}
+
+.share-controls {
   display: flex;
   align-items: center;
   gap: 0.75rem;
   min-width: 0;
 }
 
-.example-picker-label {
+.toolbar-btn {
+  padding: 0.4rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
   font-size: 0.875rem;
   font-weight: 600;
-  color: var(--title);
+  cursor: pointer;
   white-space: nowrap;
+}
+
+.toolbar-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.share-status {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 28rem;
+}
+
+.share-status-warn {
+  color: #b45309;
+}
+
+.share-status-error {
+  color: var(--result-noncompliant-line);
 }
 
 .example-menu {
   position: relative;
-  min-width: min(28rem, 100%);
-  max-width: 40rem;
+  z-index: 30;
+  width: min(18rem, 100%);
 }
 
 .example-menu-toggle {
@@ -81,10 +150,10 @@ body {
 
 .example-menu-panel {
   position: absolute;
-  z-index: 20;
+  z-index: 30;
   top: calc(100% + 0.25rem);
   left: 0;
-  right: 0;
+  width: 100%;
   max-height: min(24rem, 50vh);
   overflow: auto;
   border: 1px solid var(--border);
@@ -279,7 +348,7 @@ body {
 }
 
 .results-section {
-  padding: 1rem 5rem 1.25rem;
+  padding: 1rem 3rem 1.25rem;
 }
 
 .cm-diff-add {
@@ -299,17 +368,33 @@ body {
 
 @media (max-width: 900px) {
   .toolbar {
+    grid-template-columns: 1fr;
     padding-inline: 1rem;
   }
 
-  .example-picker {
-    flex: 1;
-    flex-direction: column;
-    align-items: stretch;
+  .toolbar-half-examples {
+    flex-wrap: wrap;
+  }
+
+  .toolbar-brand {
+    width: 100%;
   }
 
   .example-menu {
+    width: 100%;
+  }
+
+  .toolbar-half-share {
+    justify-content: stretch;
+  }
+
+  .share-controls {
+    flex-wrap: wrap;
+  }
+
+  .share-status {
     max-width: none;
+    white-space: normal;
   }
 
   .editors {
