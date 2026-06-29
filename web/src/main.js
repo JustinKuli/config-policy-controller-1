@@ -382,6 +382,40 @@ async function resolveInitialState() {
   }
 }
 
+function updateShareLoadStatus(state) {
+  if (state.loadedFromShare) {
+    const parts = ['policy', 'resources']
+    if (state.additionalMappings) {
+      parts.push('mappings')
+    }
+    setShareStatus(`Loaded ${parts.join(' and ')} from link.`)
+  } else if (state.shareError) {
+    setShareStatus(`Could not load share link: ${state.shareError}`, 'error')
+  } else {
+    clearShareStatus()
+  }
+}
+
+function applyResolvedState(state) {
+  setEditorContent(policyEditor, state.policy)
+  setEditorContent(resourcesEditor, state.resources)
+  setEditorContent(mappingsEditor, state.additionalMappings || PLACEHOLDER_MAPPINGS)
+  clearLintDiagnostics(policyEditor)
+  clearLintDiagnostics(resourcesEditor)
+  setResultsContent(resultsEditor, PLACEHOLDER_RESULTS, null)
+  updateShareLoadStatus(state)
+
+  const toggle = document.getElementById('example-menu-toggle')
+  toggle.textContent = 'Load an example…'
+  closeExampleMenu()
+}
+
+function setupShareHashListener() {
+  window.addEventListener('hashchange', () => {
+    resolveInitialState().then(applyResolvedState)
+  })
+}
+
 function getExportPolicyYaml() {
   const policy = stripPolicyStatus(policyEditor.state.doc.toString()).trimEnd()
 
@@ -656,15 +690,10 @@ async function initializeApp() {
 
   populateExampleMenu()
   setupExampleMenu()
+  setupShareHashListener()
 
-  if (initialState.loadedFromShare) {
-    const parts = ['policy', 'resources']
-    if (initialState.additionalMappings) {
-      parts.push('mappings')
-    }
-    setShareStatus(`Loaded ${parts.join(' and ')} from link.`)
-  } else if (initialState.shareError) {
-    setShareStatus(`Could not load share link: ${initialState.shareError}`, 'error')
+  if (initialState.loadedFromShare || initialState.shareError) {
+    updateShareLoadStatus(initialState)
   }
 
   document.getElementById('export-btn').addEventListener('click', async () => {
