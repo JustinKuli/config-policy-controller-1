@@ -7,9 +7,10 @@
   "type": "module",
   "scripts": {
     "generate-examples": "node scripts/generate-examples.mjs",
-    "predev": "npm run generate-examples",
+    "ensure-wasm": "node scripts/ensure-wasm.mjs",
+    "predev": "npm run generate-examples && npm run ensure-wasm",
     "dev": "vite",
-    "prebuild": "npm run generate-examples",
+    "prebuild": "npm run generate-examples && npm run ensure-wasm",
     "build": "vite build",
     "preview": "vite preview"
   },

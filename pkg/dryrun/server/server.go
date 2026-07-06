@@ -11,12 +11,10 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/stolostron/go-template-utils/v7/pkg/lint"
-	"open-cluster-management.io/config-policy-controller/pkg/dryrun"
+	"open-cluster-management.io/config-policy-controller/pkg/dryrun/playground"
 )
 
 // NewCommand returns a cobra command that runs the dryrun web server. Register it
@@ -143,13 +141,9 @@ func handleEvaluate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := dryrun.Evaluate(r.Context(), dryrun.EvaluateInput{
-		PolicyYAML:             req.Policy,
-		ResourcesYAML:          req.Resources,
-		AdditionalMappingsYAML: req.AdditionalMappings,
-	})
-	if err != nil && !errors.Is(err, dryrun.ErrNonCompliant) {
-		writeEvaluateError(w, evaluateErrorStatus(err), err)
+	result, err := playground.Evaluate(r.Context(), req.Policy, req.Resources, req.AdditionalMappings)
+	if err != nil && !playground.IsEvaluateSuccess(err) {
+		writeEvaluateError(w, playground.EvaluateErrorStatus(err), err)
 
 		return
 	}
@@ -161,17 +155,8 @@ type lintRequest struct {
 	Policy string `json:"policy"`
 }
 
-type lintIssue struct {
-	Line     int    `json:"line"`
-	Column   int    `json:"column"`
-	Severity string `json:"severity"`
-	Message  string `json:"message"`
-	RuleID   string `json:"ruleId"`
-	Source   string `json:"source"`
-}
-
 type lintResponse struct {
-	Issues []lintIssue `json:"issues"`
+	Issues []playground.LintIssue `json:"issues"`
 }
 
 func handleLint(w http.ResponseWriter, r *http.Request) {
@@ -192,40 +177,7 @@ func handleLint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	violations := lint.Lint(req.Policy)
-	writeJSON(w, http.StatusOK, lintResponse{Issues: violationsToIssues(violations)})
-}
-
-func violationsToIssues(violations []lint.LinterRuleViolation) []lintIssue {
-	if len(violations) == 0 {
-		return []lintIssue{}
-	}
-
-	issues := make([]lintIssue, 0, len(violations))
-
-	for _, violation := range violations {
-		severity := "warning"
-
-		if metadata := lint.GetRuleMetadata(violation.RuleID); metadata != nil {
-			severity = metadata.Level
-		}
-
-		column := violation.Column
-		if column == 0 {
-			column = 1
-		}
-
-		issues = append(issues, lintIssue{
-			Line:     violation.LineNumber,
-			Column:   column,
-			Severity: severity,
-			Message:  violation.Message,
-			RuleID:   violation.RuleID,
-			Source:   "Policy",
-		})
-	}
-
-	return issues
+	writeJSON(w, http.StatusOK, lintResponse{Issues: playground.LintPolicy(req.Policy)})
 }
 
 func readEvaluateBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
@@ -239,19 +191,6 @@ func readEvaluateBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
 	}
 
 	return body, nil
-}
-
-func evaluateErrorStatus(err error) int {
-	msg := err.Error()
-
-	if strings.Contains(msg, "unable to read input policy") ||
-		strings.Contains(msg, "unable to read input resources") ||
-		strings.Contains(msg, "unable to apply input resources") ||
-		strings.Contains(msg, "unable to read additional API mappings") {
-		return http.StatusBadRequest
-	}
-
-	return http.StatusInternalServerError
 }
 
 func writeEvaluateError(w http.ResponseWriter, status int, err error) {

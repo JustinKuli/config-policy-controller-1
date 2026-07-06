@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/types"
@@ -57,6 +58,11 @@ func GetWatchNamespace() (string, error) {
 func GetOperatorNamespace() (string, error) {
 	if isRunModeLocal() {
 		return "", ErrRunLocal
+	}
+
+	// Go compiled to WebAssembly has no pod service account filesystem.
+	if runtime.GOOS == "js" {
+		return "", ErrNoNamespace
 	}
 
 	nsBytes, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")

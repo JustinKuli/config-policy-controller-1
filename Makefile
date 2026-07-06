@@ -88,8 +88,14 @@ build-cmd: manifests
 generate-examples:
 	cd web && npm run generate-examples
 
+.PHONY: build-wasm
+build-wasm:
+	GOOS=js GOARCH=wasm go build -ldflags="-s -w" -o web/public/dryrun.wasm ./cmd/dryrun-wasm
+	@rm -f web/public/wasm_exec.js
+	@install -m 644 "$$(go env GOROOT)/lib/wasm/wasm_exec.js" web/public/wasm_exec.js
+
 .PHONY: build-web
-build-web: generate-examples
+build-web: generate-examples build-wasm
 	cd web && npm run build
 
 .PHONY: build-cmd-ui

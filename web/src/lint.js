@@ -1,6 +1,7 @@
 // Copyright Contributors to the Open Cluster Management project
 
 import { parseAllDocuments, parseDocument } from 'yaml'
+import { lintPolicyTemplates } from './wasm.js'
 
 /**
  * @typedef {'error' | 'warning'} LintSeverity
@@ -252,36 +253,38 @@ export function stripPolicyStatus(policyYaml) {
   return lines.slice(0, statusLineIndex).join('\n').replace(/\s+$/, '')
 }
 
-function normalizeServerSeverity(severity) {
+function normalizeTemplateSeverity(severity) {
   return severity === 'error' ? 'error' : 'warning'
 }
 
 /**
- * Map /api/lint response items to playground lint issues.
- * @param {Array<{ line: number, column: number, severity: string, message: string, ruleId?: string, source?: string }>} apiIssues
- * @returns {LintIssue[]}
+ * Run go-template-utils policy template lint via WebAssembly.
+ * @param {string} policyYaml
+ * @returns {Promise<LintIssue[]>}
  */
-function mapServerLintIssues(apiIssues) {
-  return apiIssues.map((issue) => ({
+export async function lintPolicySpec(policyYaml) {
+  const issues = await lintPolicyTemplates(stripPolicyStatus(policyYaml))
+
+  return issues.map((issue) => ({
     line: issue.line,
     column: issue.column,
     message: issue.message,
-    severity: normalizeServerSeverity(issue.severity),
+    severity: normalizeTemplateSeverity(issue.severity),
     source: issue.source ?? 'Policy',
     ruleId: issue.ruleId,
   }))
 }
 
 /**
- * Merge browser and server lint results, dropping duplicate trailing-whitespace
- * warnings on the policy pane when the server already reported them.
+ * Merge browser and template lint results, dropping duplicate trailing-whitespace
+ * warnings on the policy pane when template lint already reported them.
  * @param {LintIssue[]} browserIssues
- * @param {LintIssue[]} serverIssues
+ * @param {LintIssue[]} templateIssues
  * @returns {LintIssue[]}
  */
-export function mergeLintIssues(browserIssues, serverIssues) {
-  const serverTrailingWhitespaceLines = new Set(
-    serverIssues
+export function mergeLintIssues(browserIssues, templateIssues) {
+  const templateTrailingWhitespaceLines = new Set(
+    templateIssues
       .filter((issue) => issue.ruleId === 'GTUL001')
       .map((issue) => issue.line),
   )
@@ -291,41 +294,8 @@ export function mergeLintIssues(browserIssues, serverIssues) {
       return true
     }
 
-    return !serverTrailingWhitespaceLines.has(issue.line)
+    return !templateTrailingWhitespaceLines.has(issue.line)
   })
 
-  return [...filteredBrowser, ...serverIssues]
-}
-
-/**
- * Run go-template-utils policy template lint via the dryrun server.
- * @param {string} policyYaml
- * @returns {Promise<LintIssue[]>}
- */
-export async function fetchPolicyLint(policyYaml) {
-  const response = await fetch('/api/lint', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ policy: stripPolicyStatus(policyYaml) }),
-  })
-
-  let data
-  try {
-    data = await response.json()
-  } catch {
-    throw new Error('Server returned a non-JSON response')
-  }
-
-  if (!response.ok) {
-    throw new Error(data.error ?? `Request failed (${response.status})`)
-  }
-
-  return mapServerLintIssues(data.issues ?? [])
-}
-
-export function formatLintUnavailable(message) {
-  return `# Policy template lint unavailable
-
-${message}
-`
+  return [...filteredBrowser, ...templateIssues]
 }

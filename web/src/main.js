@@ -7,14 +7,14 @@ import { basicSetup } from 'codemirror'
 import YAML from 'js-yaml'
 import { collectionExamples, testExamples } from './examples.generated.js'
 import {
-  fetchPolicyLint,
   formatCombinedResults,
-  formatLintUnavailable,
   hasLintErrors,
   lintPlaygroundInputs,
+  lintPolicySpec,
   mergeLintIssues,
   stripPolicyStatus,
 } from './lint.js'
+import { evaluatePolicy, initDryrunWasm, isDryrunWasmReady } from './wasm.js'
 import {
   SHARE_LINK_WARN_BYTES,
   buildShareUrl,
@@ -696,6 +696,10 @@ async function initializeApp() {
     updateShareLoadStatus(initialState)
   }
 
+  initDryrunWasm().catch(() => {
+    // First Simulate will surface a clear error if the engine is missing.
+  })
+
   document.getElementById('export-btn').addEventListener('click', async () => {
     const exportBtn = document.getElementById('export-btn')
     exportBtn.disabled = true
@@ -732,71 +736,37 @@ async function initializeApp() {
     runBtn.disabled = true
 
     let lintIssues = []
+    let browserIssues = []
 
     try {
+      if (!isDryrunWasmReady()) {
+        setResultsContent(resultsEditor, '# Loading policy engine…\n', null)
+      }
+
       const policyText = policyEditor.state.doc.toString()
       const resourcesText = resourcesEditor.state.doc.toString()
-      const browserIssues = lintPlaygroundInputs(policyText, resourcesText)
-      let lintUnavailable = null
-
-      try {
-        const serverIssues = await fetchPolicyLint(policyText)
-        lintIssues = mergeLintIssues(browserIssues, serverIssues)
-      } catch (err) {
-        lintUnavailable = err.message
-        lintIssues = browserIssues
-      }
+      browserIssues = lintPlaygroundInputs(policyText, resourcesText)
+      const templateIssues = await lintPolicySpec(policyText)
+      lintIssues = mergeLintIssues(browserIssues, templateIssues)
 
       applyPlaygroundLint(lintIssues)
 
       if (hasLintErrors(lintIssues)) {
-        setResultsContent(
-          resultsEditor,
-          formatCombinedResults(
-            lintIssues,
-            lintUnavailable ? formatLintUnavailable(lintUnavailable) : '',
-          ),
-          'error',
-        )
+        setResultsContent(resultsEditor, formatCombinedResults(lintIssues, ''), 'error')
 
         return
       }
 
-      const response = await fetch('/api/evaluate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildEvaluateRequestBody(policyText, resourcesText)),
-      })
-
-      let data
-      try {
-        data = await response.json()
-      } catch {
-        data = { error: 'Server returned a non-JSON response' }
-      }
-
-      if (!response.ok || data.error) {
-        setResultsContent(
-          resultsEditor,
-          formatCombinedResults(
-            lintIssues,
-            `${lintUnavailable ? `${formatLintUnavailable(lintUnavailable).trimEnd()}\n\n` : ''}# Error (${response.status})
-
-${data.error ?? 'Unknown error'}`,
-          ),
-          'error',
-        )
-
-        return
-      }
-
-      const evaluateBody = lintUnavailable
-        ? `${formatLintUnavailable(lintUnavailable).trimEnd()}\n\n${formatEvaluateResult(data)}`
-        : formatEvaluateResult(data)
+      const requestBody = buildEvaluateRequestBody(policyText, resourcesText)
+      const data = await evaluatePolicy(
+        requestBody.policy,
+        requestBody.resources,
+        requestBody.additionalMappings ?? '',
+      )
 
       setResultsContent(
         resultsEditor,
-        formatCombinedResults(lintIssues, evaluateBody),
+        formatCombinedResults(lintIssues, formatEvaluateResult(data)),
         data.complianceState || 'Unknown',
       )
 
@@ -804,16 +774,17 @@ ${data.error ?? 'Unknown error'}`,
         policyEditor,
         appendPolicyStatus(policyEditor.state.doc.toString(), data.status),
       )
-      applyPlaygroundLint(lintIssues)
     } catch (err) {
+      const issues = lintIssues.length ? lintIssues : browserIssues
+      applyPlaygroundLint(issues)
+
+      const status = err.status ?? 500
+      const message = err.message ?? 'Unknown error'
+      const errorHeading = status >= 500 ? 'Request failed' : `Error (${status})`
+
       setResultsContent(
         resultsEditor,
-        formatCombinedResults(
-          lintIssues,
-          `# Request failed
-
-${err.message}`,
-        ),
+        formatCombinedResults(issues, `# ${errorHeading}\n\n${message}`),
         'error',
       )
     } finally {

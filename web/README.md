@@ -15,13 +15,19 @@ be an ideal representation of how to do this (especially the JS parts).
 - [@codemirror/lint](https://codemirror.net/) — inline lint markers on Simulate
 - [js-yaml](https://github.com/nodeca/js-yaml) — policy/status serialization in the browser
 - [yaml](https://eemeli.org/yaml/) — YAML parse and lint (eemeli)
-- Go HTTP server in [`pkg/dryrun/server`](../pkg/dryrun/server/) — evaluation and
-  [go-template-utils](https://github.com/stolostron/go-template-utils) policy template lint
+- Go WebAssembly (`dryrun.wasm`) — policy evaluation and
+  [go-template-utils](https://github.com/stolostron/go-template-utils) template lint,
+  compiled from [`cmd/dryrun-wasm`](../cmd/dryrun-wasm/) via [`pkg/dryrun/playground`](../pkg/dryrun/playground/)
+
+The playground is fully static: no backend server is required at runtime. Evaluation
+runs locally in the browser through the same dryrun logic used by the CLI.
 
 ## Prerequisites
 
 Node.js **18, 20, or 22+** (Vite 6 requirement). Node **22** is recommended; see
 `.nvmrc`.
+
+Go **1.26+** (see `go.mod`) is required to build `dryrun.wasm`.
 
 ```bash
 cd web
@@ -32,16 +38,18 @@ npm install
 
 `npm install` and the first `npm run dev` / `npm run build` run
 `scripts/generate-examples.mjs`, which writes `src/examples.generated.js` (gitignored).
+If `public/dryrun.wasm` is missing, `scripts/ensure-wasm.mjs` runs `make build-wasm`.
 
-## Building the dryrun binary
+## Building
 
 Run these from the **repository root**:
 
 | Target | What it does |
 |--------|----------------|
 | `make generate-examples` | Regenerate `web/src/examples.generated.js` from example sources |
-| `make build-web` | Runs `generate-examples`, then `npm run build` in `web/` → `web/dist/` |
-| `make build-cmd` | Builds `build/_output/bin/dryrun` (CLI only; `serve` exposes the API, no embedded UI) |
+| `make build-wasm` | Build `web/public/dryrun.wasm` and copy `wasm_exec.js` |
+| `make build-web` | Runs `generate-examples`, `build-wasm`, then `npm run build` in `web/` → `web/dist/` |
+| `make build-cmd` | Builds `build/_output/bin/dryrun` (CLI; optional `serve` subcommand exposes a JSON API) |
 | `make build-cmd-ui` | Runs `build-web`, then builds `dryrun` with the web UI embedded (`-tags embedui`) |
 
 `make build-cmd-ui` requires `npm install` in `web/` first. The UI is embedded at
@@ -51,104 +59,51 @@ served from the filesystem root.
 
 ## Development
 
-For live UI changes, run the API and Vite dev server as two processes:
-
 ```bash
-# terminal 1 — from repository root; API on :8080
-make build-cmd
-build/_output/bin/dryrun serve --addr :8080
-
-# terminal 2 — from web/
 cd web
 npm run dev
 ```
 
-Open the URL Vite prints (usually `http://localhost:5173`). Vite proxies `/api` to
-`:8080` (see `vite.config.js`).
+Open the URL Vite prints (usually `http://localhost:5173`). The first run builds
+`dryrun.wasm` if it is not already present.
 
-If you use a UI-enabled binary (`make build-cmd-ui`) for the API process, pass
-`--api-only` so it does not also serve the embedded pages:
+## Production / static hosting
+
+Build and preview locally:
 
 ```bash
-build/_output/bin/dryrun serve --addr :8080 --api-only
+make build-web
+cd web && npm run preview
 ```
 
-## Production / integrated mode
+Deploy the contents of `web/dist/` to any static host (GitHub Pages, S3, Netlify,
+etc.). No Node.js or Go process is required at runtime.
 
-Build one self-contained binary and serve everything from it:
+The policy engine is shipped as `dryrun.wasm` (~130 MB uncompressed, ~20 MB
+gzip-compressed). Browsers download it once on the first Simulate click and cache
+it. Enable gzip or brotli on your host/CDN if possible.
+
+## Integrated binary (optional)
+
+You can still serve the playground from a single self-contained binary:
 
 ```bash
 make build-cmd-ui
 build/_output/bin/dryrun serve --addr :8080
 ```
 
-Open `http://localhost:8080`. No static directory or Node.js is required at runtime.
+Open `http://localhost:8080`. This embeds the same static assets from `web/dist/`.
 
-## API
+## dryrun serve API (optional)
 
-The server exposes two JSON endpoints.
-
-### Evaluate
-
-```
-POST /api/evaluate
-Content-Type: application/json
-
-{ "policy": "...", "resources": "...", "additionalMappings": "..." }
-```
-
-`additionalMappings` is optional. When present, entries are merged with the
-server's built-in API mappings (same format as `dryrun generate` / `--mappings-file`).
-Omit it or leave the UI mappings tab empty to use defaults only.
-
-Response on success (an `EvaluateResult`):
-
-```json
-{
-  "complianceState": "Compliant",
-  "status": { "compliant": "Compliant", "relatedObjects": [...] },
-  "messages": ["..."]
-}
-```
-
-Non-compliant policies still return `200` with the full result;
-`complianceState` will be `NonCompliant`. Client errors (malformed YAML, invalid
-resource field types, invalid additional API mappings, and similar input problems)
-return `400` with `{ "error": "..." }`. Unexpected server failures return `500`.
-
-The UI sends the full policy document (including any existing `status:` block) so
-`history` accumulates across runs, but strips `status.lastEvaluated` and
-`status.lastEvaluatedGeneration` before each request so evaluation is not skipped.
-
-### Lint
+The CLI subcommand `dryrun serve` (see [`pkg/dryrun/server`](../pkg/dryrun/server/))
+exposes the same evaluate/lint logic as JSON endpoints. The browser UI no longer
+uses these, but they remain available for other clients:
 
 ```
-POST /api/lint
-Content-Type: application/json
-
-{ "policy": "..." }
+POST /api/evaluate   { "policy", "resources", "additionalMappings"? }
+POST /api/lint       { "policy" }
 ```
-
-Response on success:
-
-```json
-{
-  "issues": [
-    {
-      "line": 11,
-      "column": 17,
-      "severity": "warning",
-      "message": "Templates should be single-quoted.",
-      "ruleId": "GTUL003",
-      "source": "Policy"
-    }
-  ]
-}
-```
-
-Linting uses [go-template-utils `pkg/lint`](https://github.com/stolostron/go-template-utils/tree/main/pkg/lint).
-The UI sends the policy spec only (no appended `status:` block). Malformed JSON
-returns `400`; an empty issue list means no violations were found.
 
 ## Layout
 
@@ -180,7 +135,7 @@ returns `400`; an empty issue list means no violations were found.
   is appended below the spec (replaced on each run).
 - **Cluster** — tabbed pane with **Resources** (YAML documents simulating cluster
   state; separate multiple objects with `---`) and **API mappings** (optional
-  additional mappings merged with server defaults on Simulate; same format as
+  additional mappings merged with built-in defaults on Simulate; same format as
   `dryrun generate`).
 - **Results** — lint output (when present), then compliance state, messages, and diffs.
   Read-only, line-wrapped, with diff-line coloring.
@@ -190,21 +145,21 @@ scrolling. Adjust that variable in `src/style.css` to change pane sizing globall
 
 ## Simulate workflow
 
-Clicking **Simulate** runs lint first, then calls the evaluation API:
+Clicking **Simulate** loads the policy engine (if needed), runs lint, then evaluates:
 
-1. **Lint** both editors in the browser, and lint the policy spec via `POST /api/lint`.
-   Nothing runs while you type.
-2. Show squiggles and gutter markers in the Policy and Cluster resources panes.
-3. **Errors** (YAML syntax, empty policy, template delimiter/variable errors) block
+1. **Preload** — the WASM module begins loading when the page opens; the first
+   Simulate shows “Loading policy engine…” if it is not ready yet.
+2. **Lint** — browser YAML lint on both editors, then template lint on the policy
+   spec via WebAssembly. Nothing runs while you type.
+3. Show squiggles and gutter markers in the Policy and Cluster resources panes.
+4. **Errors** (YAML syntax, empty policy, template delimiter/variable errors) block
    simulation and fill the Results pane with a `# Lint` section.
-4. **Warnings** do not block simulation. They appear in Results alongside simulation
-   output or API errors when present.
-5. If template lint is unavailable (for example the API is unreachable), the UI shows
-   a notice and continues with browser lint and evaluation.
-6. **Evaluate** via `POST /api/evaluate` when there are no lint errors. Sends
+5. **Warnings** do not block simulation. They appear in Results alongside simulation
+   output or errors when present.
+6. **Evaluate** via WebAssembly when there are no lint errors. Sends
    `additionalMappings` when the API mappings tab contains mapping entries.
-7. Append `status:` to the policy editor on success; lint markers on the spec are
-   preserved. The appended status block is excluded from lint on subsequent runs.
+7. Append `status:` to the policy editor on success. The appended status block is
+   excluded from lint on subsequent runs.
 
 ### Lint rules
 
@@ -222,7 +177,7 @@ appended after Simulate is never linted.
 | Warning | Policy, Resources | Block sequence entries not starting with `"- "` |
 | Warning | Policy, Resources | Unquoted truthy scalars (`yes`, `no`, `on`, `off`, `true`, `false`, `y`, `n`) |
 
-**Template lint** (`POST /api/lint`, go-template-utils) — policy spec only:
+**Template lint** (WebAssembly, go-template-utils) — policy spec only:
 
 | Severity | Rule ID | Rule |
 |----------|---------|------|
@@ -234,7 +189,7 @@ appended after Simulate is never linted.
 | Warning | GTUL006 | Mismatched quotes around templates |
 
 When both linters report trailing whitespace on the same policy line, the browser
-warning is dropped in favor of the server result.
+warning is dropped in favor of the template lint result.
 
 ## Examples
 
@@ -268,17 +223,19 @@ web/
 ├── embed.go                # go:embed dist/* (embedui build tag)
 ├── embed_stub.go           # no-op Dist() for builds without embedui
 ├── examples/               # curated example sources (one folder per example)
+├── public/                 # dryrun.wasm and wasm_exec.js (generated; gitignored)
 ├── scripts/
-│   └── generate-examples.mjs
+│   ├── generate-examples.mjs
+│   └── ensure-wasm.mjs
 ├── src/
-│   ├── main.js             # CodeMirror, API client, example menu, Simulate flow
-│   ├── lint.js             # Browser lint, server lint client, result formatting
+│   ├── main.js             # CodeMirror, example menu, Simulate flow
+│   ├── lint.js             # Browser YAML lint and result formatting
+│   ├── wasm.js             # WebAssembly loader and evaluate/lint calls
 │   ├── share.js            # URL hash encode/decode and share status UI
 │   ├── style.css
 │   ├── ocm-logo-hept.png
 │   └── examples.generated.js   # generated; gitignored
 ├── package.json
-├── vite.config.js          # dev proxy for /api
 └── .nvmrc
 ```
 
